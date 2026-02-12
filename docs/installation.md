@@ -21,7 +21,7 @@
 
 ```bash
 # В Termux выполните:
-curl -sSL https://raw.githubusercontent.com/yourusername/roampal-android/main/termux/setup.sh | bash
+curl -sSL https://raw.githubusercontent.com/Wvwvwvwvwv/jubilant-computing-machine/main/termux/setup.sh | bash
 ```
 
 Скрипт автоматически:
@@ -38,7 +38,7 @@ curl -sSL https://raw.githubusercontent.com/yourusername/roampal-android/main/te
 
 **Для начала (легкая):**
 ```bash
-cd ~/roampal-android/models
+cd $HOME/roampal-android/models
 wget https://huggingface.co/bartowski/L3-8B-Stheno-v3.2-GGUF/resolve/main/L3-8B-Stheno-v3.2-Q4_K_M.gguf
 ```
 
@@ -50,7 +50,7 @@ wget https://huggingface.co/bartowski/Qwen2.5-14B-Instruct-GGUF/resolve/main/Qwe
 ### 4. Запуск
 
 ```bash
-cd ~/roampal-android
+cd $HOME/roampal-android
 ./termux/start-services.sh
 ```
 
@@ -76,8 +76,8 @@ pkg install -y python python-pip nodejs git wget curl proot-distro openssl clang
 
 ```bash
 cd ~
-git clone https://github.com/yourusername/roampal-android.git
-cd roampal-android
+git clone https://github.com/Wvwvwvwvwv/jubilant-computing-machine.git
+cd jubilant-computing-machine
 ```
 
 ### Шаг 4: KoboldCpp
@@ -92,24 +92,27 @@ make LLAMA_PORTABLE=1
 ### Шаг 5: Backend
 
 ```bash
-cd ~/roampal-android/backend/core
+cd $HOME/jubilant-computing-machine/backend/core
 pip install -r requirements.txt
 
-cd ~/roampal-android/backend/embeddings
+cd $HOME/jubilant-computing-machine/backend/embeddings
+pip install -r requirements.txt
+
+cd $HOME/jubilant-computing-machine/backend/sandbox
 pip install -r requirements.txt
 ```
 
 ### Шаг 6: Frontend
 
 ```bash
-cd ~/roampal-android/frontend
+cd $HOME/jubilant-computing-machine/frontend
 npm install
 ```
 
 ### Шаг 7: Запуск
 
 ```bash
-cd ~/roampal-android
+cd $HOME/jubilant-computing-machine
 ./termux/start-services.sh
 ```
 
@@ -129,29 +132,30 @@ curl http://localhost:5173               # Frontend
 
 ```bash
 # Проверьте наличие модели
-ls ~/roampal-android/models/*.gguf
+ls $HOME/jubilant-computing-machine/models/*.gguf
 
 # Запустите вручную
-cd ~/koboldcpp
-python koboldcpp.py --model ~/roampal-android/models/YOUR_MODEL.gguf
+cd $HOME/koboldcpp
+python koboldcpp.py --model $HOME/jubilant-computing-machine/models/YOUR_MODEL.gguf
 ```
 
 ### Backend ошибки
 
 ```bash
 # Проверьте логи
-cat ~/roampal-android/logs/core.log
-cat ~/roampal-android/logs/embeddings.log
+cat $HOME/jubilant-computing-machine/logs/core.log
+cat $HOME/jubilant-computing-machine/logs/embeddings.log
+cat $HOME/jubilant-computing-machine/logs/sandbox.log
 ```
 
 ### Frontend не открывается
 
 ```bash
-# Проверьте Node.js
+# Проверьте Node.js версию
 node --version  # Должно быть v18+
 
-# Переустановите зависимости
-cd ~/roampal-android/frontend
+# Переустанов��те зависимости
+cd $HOME/jubilant-computing-machine/frontend
 rm -rf node_modules
 npm install
 ```
@@ -159,26 +163,8 @@ npm install
 ## Обновление
 
 ```bash
-cd ~/roampal-android
+cd $HOME/jubilant-computing-machine
 git pull
 ./termux/stop-services.sh
 ./termux/start-services.sh
 ```
-
-## Благодарности
-
-Проект Roampal Android построен на основе следующих замечательных проектов. Спасибо всем разработчикам и сообществам:
-
-### Ключевые компоненты
-
-- **[Roampal](https://github.com/roampal-ai/roampal)** - основной фреймворк и [MCP интеграция](https://github.com/roampal-ai/roampal?tab=readme-ov-file#mcp-integration)
-- **[Termux](https://termux.dev/)** - терминальная среда для Android
-- **[proot-distro](https://github.com/termux/proot-distro)** - запуск Linux дистрибутивов в Termux
-- **[KoboldCpp](https://github.com/LostRuins/koboldcpp)** - оптимизированный LLM на C++
-- **[llama.cpp](https://github.com/ggerganov/llama.cpp)** - CPU-инференс для LLM
-- **[Ralph](https://github.com/snarktank/ralph)** - инструменты и утилиты
-- **[Hugging Face](https://huggingface.co/)** - модели и датасеты
-- **[Node.js](https://nodejs.org/)** - JavaScript runtime
-- **[Python](https://www.python.org/)** - язык программирования
-
-Спасибо всем мейнтейнерам и контрибьюторам за их отличную работу!
