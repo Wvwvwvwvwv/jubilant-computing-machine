@@ -19,17 +19,41 @@ start_service() {
     local name=$1
     local cmd=$2
     local log="$PROJECT_ROOT/logs/$name.log"
-    
+
     mkdir -p "$PROJECT_ROOT/logs"
-    
+
     echo "▶️  Запуск $name..."
     nohup bash -c "$cmd" > "$log" 2>&1 &
     echo $! > "$PROJECT_ROOT/logs/$name.pid"
     echo "   PID: $(cat $PROJECT_ROOT/logs/$name.pid)"
 }
 
+wait_http() {
+    local url=$1
+    local attempts=${2:-20}
+    local sleep_s=${3:-1}
+
+    for _ in $(seq 1 "$attempts"); do
+        if curl -fsS -m 3 "$url" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep "$sleep_s"
+    done
+
+    return 1
+}
+
+free_frontend_port() {
+    # Закрываем старые процессы frontend перед запуском, чтобы strictPort не падал
+    if [ -f "$PROJECT_ROOT/logs/frontend.pid" ]; then
+        kill "$(cat "$PROJECT_ROOT/logs/frontend.pid")" 2>/dev/null || true
+        rm -f "$PROJECT_ROOT/logs/frontend.pid"
+    fi
+    pkill -f "frontend/node_modules/.bin/vite" 2>/dev/null || true
+}
+
 # 1. Запуск KoboldCpp
-start_service "koboldcpp" "cd $PROJECT_ROOT && ./termux/start-kobold.sh"
+start_service "koboldcpp" "cd $PROJECT_ROOT && bash termux/start-kobold.sh"
 echo "⏳ Ожидание запуска KoboldCpp (30 сек)..."
 sleep 30
 
@@ -42,7 +66,17 @@ start_service "core" "cd $PROJECT_ROOT/backend/core && python main.py"
 sleep 5
 
 # 4. Запуск Frontend
-start_service "frontend" "cd $PROJECT_ROOT/frontend && npm run dev -- --host"
+free_frontend_port
+start_service "frontend" "cd $PROJECT_ROOT/frontend && npm run dev -- --host 127.0.0.1 --port 5173 --strictPort"
+
+if ! wait_http "http://127.0.0.1:5173" 20 1; then
+    echo "⚠️ Frontend не поднялся на :5173, пробую запасной запуск с 0.0.0.0..."
+    if [ -f "$PROJECT_ROOT/logs/frontend.pid" ]; then
+        kill "$(cat "$PROJECT_ROOT/logs/frontend.pid")" 2>/dev/null || true
+    fi
+    start_service "frontend" "cd $PROJECT_ROOT/frontend && npm run dev -- --host"
+    sleep 3
+fi
 
 echo ""
 echo "✅ Все сервисы запущены!"

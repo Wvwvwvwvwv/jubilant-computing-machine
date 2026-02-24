@@ -24,13 +24,13 @@
 ```bash
 # Скачать Termux с F-Droid
 # Запустить автоустановку
-curl -sSL https://raw.githubusercontent.com/yourusername/roampal-android/main/termux/setup.sh | bash
+curl -sSL https://raw.githubusercontent.com/Wvwvwvwvwv/jubilant-computing-machine/main/termux/setup.sh | bash
 ```
 
 ### 2. Запуск сервисов
 ```bash
 cd ~/roampal-android
-./termux/start-services.sh
+bash termux/start-services.sh
 ```
 
 ### 3. Запуск frontend
@@ -40,6 +40,12 @@ npm run dev
 ```
 
 Открыть http://localhost:5173
+
+Если видите "Ошибка соединения с сервером", запустите диагностику:
+```bash
+cd ~/roampal-android
+bash termux/diagnose.sh
+```
 
 ## Возможности
 
@@ -68,22 +74,3 @@ data/            - Персистентные данные
 - [Установка](docs/installation.md)
 - [Архитектура](docs/architecture.md)
 - [API](docs/api.md)
-- [Разработка](docs/development.md)
-
-## Благодарности
-
-Проект Roampal Android построен на основе следующих замечательных проектов. Спасибо всем разработчикам и сообществам:
-
-### Ключевые компоненты
-
-- **[Roampal](https://github.com/roampal-ai/roampal)** - основной фреймворк и [MCP интеграция](https://github.com/roampal-ai/roampal?tab=readme-ov-file#mcp-integration)
-- **[Termux](https://termux.dev/)** - терминальная среда для Android
-- **[proot-distro](https://github.com/termux/proot-distro)** - запуск Linux дистрибутивов в Termux
-- **[KoboldCpp](https://github.com/LostRuins/koboldcpp)** - оптимизированный LLM на C++
-- **[llama.cpp](https://github.com/ggerganov/llama.cpp)** - CPU-инференс для LLM
-- **[Ralph](https://github.com/snarktank/ralph)** - инструменты и утилиты
-- **[Hugging Face](https://huggingface.co/)** - модели и датасеты
-- **[Node.js](https://nodejs.org/)** - JavaScript runtime
-- **[Python](https://www.python.org/)** - язык программирования
-
-Спасибо всем мейнтейнерам и контрибьюторам за их отличную работу!
