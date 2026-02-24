@@ -190,6 +190,14 @@ bash termux/start-services.sh
 
 
 
+
+Если фронт видит `❌ Ошибка соединения с сервером`, можно явно задать proxy target для Vite:
+
+```bash
+cd ~/roampal-android/frontend
+VITE_API_PROXY_TARGET=http://127.0.0.1:8000 npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
+```
+
 ### Диагностика ошибки "Ошибка соединения с сервером"
 
 Выполните полный диагностический прогон:

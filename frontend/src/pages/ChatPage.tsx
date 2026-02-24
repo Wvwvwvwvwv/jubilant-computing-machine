@@ -30,11 +30,12 @@ export default function ChatPage() {
         content: response.response,
         id: response.interaction_id
       }])
-    } catch (error) {
+    } catch (error: any) {
       console.error('Chat error:', error)
+      const detail = error?.response?.data?.detail
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: '❌ Ошибка соединения с сервером'
+        content: detail ? `❌ ${detail}` : '❌ Ошибка соединения с сервером'
       }])
     } finally {
       setLoading(false)
