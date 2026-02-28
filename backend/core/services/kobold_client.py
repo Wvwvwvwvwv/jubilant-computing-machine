@@ -1,5 +1,6 @@
 import httpx
-from typing import Any, List, Mapping
+from typing import Any, Dict, List
+
 
 class KoboldClient:
     """Клиент для KoboldCpp API"""
@@ -7,17 +8,6 @@ class KoboldClient:
     def __init__(self, base_url: str = "http://localhost:5001"):
         self.base_url = base_url
         self.client = httpx.AsyncClient(timeout=120.0)
-
-    @staticmethod
-    def _msg_field(msg: Any, field: str, default: str = "") -> str:
-        """Безопасно извлекает поле из dict/Pydantic-объекта сообщения."""
-
-        if isinstance(msg, Mapping):
-            value = msg.get(field, default)
-        else:
-            value = getattr(msg, field, default)
-
-        return value if isinstance(value, str) else default
     
     async def generate(
         self,
@@ -48,13 +38,31 @@ class KoboldClient:
                 json=payload
             )
             response.raise_for_status()
-            
+
             result = response.json()
-            return result["results"][0]["text"].strip()
-            
+            results = result.get("results") if isinstance(result, dict) else None
+            if not results or not isinstance(results, list) or "text" not in results[0]:
+                raise RuntimeError(f"KoboldCpp invalid response: {result}")
+            return str(results[0]["text"]).strip()
+
+        except httpx.ConnectError as e:
+            raise RuntimeError(f"KoboldCpp unavailable at {self.base_url}: {e}")
+        except httpx.HTTPStatusError as e:
+            detail = e.response.text[:500] if e.response is not None else str(e)
+            raise RuntimeError(f"KoboldCpp HTTP {e.response.status_code if e.response else 'error'}: {detail}")
         except httpx.HTTPError as e:
-            raise Exception(f"KoboldCpp error: {str(e)}")
+            raise RuntimeError(f"KoboldCpp transport error: {e}")
     
+    @staticmethod
+    def _msg_field(msg: Any, field: str, default: Any = None) -> Any:
+        """Совместимость с dict и Pydantic-объектами сообщений."""
+
+        if isinstance(msg, dict):
+            return msg.get(field, default)
+
+        value = getattr(msg, field, default)
+        return default if value is None else value
+
     def _format_messages(self, messages: List[Any]) -> str:
         """Форматирование сообщений в промпт"""
         
