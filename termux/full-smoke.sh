@@ -47,18 +47,35 @@ curl -fsS -m 12 http://127.0.0.1:5173 >/dev/null
 
 echo
 echo "==== Chat API checks ===="
-echo "> no-memory"
-curl -i -sS -m 30 \
-  -H 'Content-Type: application/json' \
-  -X POST http://127.0.0.1:8000/api/chat/ \
-  -d '{"messages":[{"role":"user","content":"Привет, ответь одним словом"}],"use_memory":false,"max_tokens":64,"temperature":0.2}'
+chat_post() {
+  local label="$1"
+  local payload="$2"
+  local timeout_sec="$3"
+  local attempts="$4"
 
-echo
-echo "> with-memory"
-curl -i -sS -m 30 \
-  -H 'Content-Type: application/json' \
-  -X POST http://127.0.0.1:8000/api/chat/ \
-  -d '{"messages":[{"role":"user","content":"Запомни: столица Франции Париж"}],"use_memory":true,"max_tokens":64,"temperature":0.2}'
+  echo "> ${label}"
+  local i
+  for i in $(seq 1 "$attempts"); do
+    if curl -i -sS -m "$timeout_sec" \
+      -H 'Content-Type: application/json' \
+      -X POST http://127.0.0.1:8000/api/chat/ \
+      -d "$payload"; then
+      echo
+      return 0
+    fi
+
+    echo
+    echo "⚠️  ${label} attempt ${i}/${attempts} failed; waiting before retry..."
+    sleep 5
+  done
+
+  echo "❌ ${label} failed after ${attempts} attempts"
+  return 1
+}
+
+# Первая генерация после старта модели может быть заметно дольше (cold start)
+chat_post "no-memory" '{"messages":[{"role":"user","content":"Привет, ответь одним словом"}],"use_memory":false,"max_tokens":64,"temperature":0.2}' 120 2
+chat_post "with-memory" '{"messages":[{"role":"user","content":"Запомни: столица Франции Париж"}],"use_memory":true,"max_tokens":64,"temperature":0.2}' 60 2
 
 echo
 echo "==== Memory tests ===="
