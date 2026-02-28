@@ -2,6 +2,8 @@ from pathlib import Path
 import uuid
 from typing import List, Dict, Optional
 import time
+import os
+import json
 
 try:
     import chromadb
@@ -15,7 +17,8 @@ class MemoryEngine:
     """Roampal-inspired outcome-based memory engine"""
 
     def __init__(self):
-        self.data_dir = Path.home() / "roampal-android" / "data" / "memory"
+        data_dir_env = os.getenv("ROAMPAL_MEMORY_DIR")
+        self.data_dir = Path(data_dir_env) if data_dir_env else Path.home() / "roampal-android" / "data" / "memory"
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
         self.client = None
@@ -24,6 +27,7 @@ class MemoryEngine:
 
         self.chroma_available = chromadb is not None
         self.in_memory_store: Dict[str, Dict] = {}
+        self.fallback_store_path = self.data_dir / "in_memory_store.json"
 
     async def initialize(self):
         """Инициализация ChromaDB или fallback на in-memory store"""
@@ -47,6 +51,39 @@ class MemoryEngine:
         self.client = None
         self.collection = None
 
+        self._load_fallback_store()
+
+    def _load_fallback_store(self):
+        """Загрузить in-memory fallback из файла при старте."""
+
+        if not self.fallback_store_path.exists():
+            return
+
+        try:
+            payload = json.loads(self.fallback_store_path.read_text(encoding="utf-8"))
+            store = payload.get("in_memory_store", {})
+            if isinstance(store, dict):
+                self.in_memory_store = store
+        except Exception:
+            # Не ломаем startup из-за поврежденного fallback файла
+            self.in_memory_store = {}
+
+    def _save_fallback_store(self):
+        """Сохранить fallback память на диск (для переживания рестартов)."""
+
+        if self.chroma_available and self.collection is not None:
+            return
+
+        try:
+            self.fallback_store_path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {"in_memory_store": self.in_memory_store}
+            self.fallback_store_path.write_text(
+                json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+            )
+        except Exception:
+            # Fallback persistence best-effort
+            pass
+
     async def add_memory(self, content: str, metadata: Optional[Dict] = None) -> str:
         """Добавить элемент в память"""
 
@@ -65,6 +102,7 @@ class MemoryEngine:
             "outcome_score": meta.get("outcome_score", 0.0),
             "type": meta.get("type", "memory"),
         }
+        self._save_fallback_store()
         return memory_id
 
     async def add_interaction(self, query: str, response: str, context_used: List[Dict]) -> str:
@@ -99,6 +137,7 @@ class MemoryEngine:
             "timestamp": time.time(),
         }
 
+        self._save_fallback_store()
         return interaction_id
 
     async def record_outcome(self, interaction_id: str, helpful: bool):
@@ -135,6 +174,8 @@ class MemoryEngine:
 
         if new_score < -0.5:
             await self.delete_memory(interaction_id)
+
+        self._save_fallback_store()
 
     async def search(self, query: str, limit: int = 10) -> List[Dict]:
         """Поиск с учетом outcome scores"""
@@ -202,13 +243,16 @@ class MemoryEngine:
         if memory_id in self.interactions:
             del self.interactions[memory_id]
 
+        self._save_fallback_store()
+
     async def get_stats(self) -> Dict:
         """Статистика памяти"""
 
         if self.chroma_available and self.collection is not None:
             count = self.collection.count()
             all_items = self.collection.get()
-            interactions = sum(1 for m in all_items["metadatas"] if m.get("type") == "interaction")
+            metadatas = all_items.get("metadatas") or []
+            interactions = sum(1 for m in metadatas if isinstance(m, dict) and m.get("type") == "interaction")
             return {
                 "total_items": count,
                 "interactions": interactions,

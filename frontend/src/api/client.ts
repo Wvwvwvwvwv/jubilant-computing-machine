@@ -5,6 +5,18 @@ const api = axios.create({
   timeout: 120000
 })
 
+export function extractApiError(error: any): string {
+  const status = error?.response?.status
+  const detail = error?.response?.data?.detail
+
+  if (detail && typeof detail === 'string') return detail
+  if (status === 503) return 'Сервис временно недоступен. Проверьте запуск backend/embeddings.'
+  if (status === 504 || error?.code === 'ECONNABORTED') return 'Превышен таймаут ответа сервера.'
+  if (!error?.response) return 'Ошибка соединения с сервером.'
+
+  return `Ошибка API (${status ?? 'unknown'})`
+}
+
 export const chatAPI = {
   send: async (messages: any[], useMemory: boolean = true) => {
     const { data } = await api.post('/chat', {

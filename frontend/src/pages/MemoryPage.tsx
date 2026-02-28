@@ -172,7 +172,7 @@ export default function MemoryPage() {
             Загрузить
             <input
               type="file"
-              accept=".txt,.md"
+              accept=".txt,.md,.html,.htm,.fb2,.pdf,text/plain,text/markdown,text/html,application/xhtml+xml,application/pdf,application/xml,text/xml,*/*"
               onChange={handleUpload}
               style={{ display: 'none' }}
             />

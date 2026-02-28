@@ -3,10 +3,14 @@
 
 set -e
 
-PROJECT_ROOT="$HOME/roampal-android"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 echo "🚀 Запуск Roampal Android Services"
 echo "==================================="
+
+# Критичный preflight: проверка фикса ChatMessage -> Kobold
+bash "$PROJECT_ROOT/termux/verify-chat-fix.sh"
 
 # Проверка установки
 if [ ! -d "$PROJECT_ROOT" ]; then
@@ -49,8 +53,20 @@ free_frontend_port() {
         kill "$(cat "$PROJECT_ROOT/logs/frontend.pid")" 2>/dev/null || true
         rm -f "$PROJECT_ROOT/logs/frontend.pid"
     fi
-    pkill -f "frontend/node_modules/.bin/vite" 2>/dev/null || true
+    pkill -f "$PROJECT_ROOT/frontend/node_modules/.bin/vite" 2>/dev/null || true
+    pkill -f "$PROJECT_ROOT/frontend/node_modules/vite/bin/vite.js" 2>/dev/null || true
 }
+
+cleanup_stale_processes() {
+    # Жесткая зачистка вручную запущенных процессов перед стартом,
+    # чтобы не оставались старые core/embeddings инстансы.
+    pkill -f "python main.py" 2>/dev/null || true
+    pkill -f "koboldcpp.py" 2>/dev/null || true
+    free_frontend_port
+}
+
+echo "🧹 Предварительная зачистка старых процессов..."
+cleanup_stale_processes
 
 # 1. Запуск KoboldCpp
 start_service "koboldcpp" "cd $PROJECT_ROOT && bash termux/start-kobold.sh"

@@ -1,5 +1,5 @@
 import httpx
-from typing import List, Dict
+from typing import Any, List
 
 class KoboldClient:
     """Клиент для KoboldCpp API"""
@@ -10,7 +10,7 @@ class KoboldClient:
     
     async def generate(
         self,
-        messages: List[Dict],
+        messages: List[Any],
         max_tokens: int = 512,
         temperature: float = 0.7,
         top_p: float = 0.9,
@@ -44,13 +44,22 @@ class KoboldClient:
         except httpx.HTTPError as e:
             raise Exception(f"KoboldCpp error: {str(e)}")
     
-    def _format_messages(self, messages: List[Dict]) -> str:
+    @staticmethod
+    def _msg_field(msg: Any, field: str, default: str = "") -> str:
+        """Безопасно получить поле сообщения из dict или Pydantic-модели."""
+        if isinstance(msg, dict):
+            value = msg.get(field, default)
+        else:
+            value = getattr(msg, field, default)
+        return value if isinstance(value, str) else str(value)
+
+    def _format_messages(self, messages: List[Any]) -> str:
         """Форматирование сообщений в промпт"""
         
         formatted = []
         for msg in messages:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
+            role = self._msg_field(msg, "role", "user")
+            content = self._msg_field(msg, "content", "")
             
             if role == "system":
                 formatted.append(f"System: {content}")

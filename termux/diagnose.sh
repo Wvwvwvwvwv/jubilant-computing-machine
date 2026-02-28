@@ -3,7 +3,8 @@
 
 set -u
 
-PROJECT_ROOT="${HOME}/roampal-android"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 LOG_DIR="$PROJECT_ROOT/logs"
 
 section() {
@@ -33,6 +34,9 @@ run_may_fail "pwd"
 run_may_fail "ls -la $PROJECT_ROOT"
 run_may_fail "ls -la $PROJECT_ROOT/termux"
 
+section "Critical chat-fix verification"
+run_may_fail "bash $PROJECT_ROOT/termux/verify-chat-fix.sh"
+
 section "Service processes"
 run_may_fail "pgrep -af 'python main.py|uvicorn|koboldcpp|vite|node'"
 
@@ -41,6 +45,9 @@ run_may_fail "curl -sS -m 8 http://localhost:8000/health"
 run_may_fail "curl -sS -m 8 http://localhost:8001/health"
 run_may_fail "curl -sS -m 8 http://localhost:5001/api/v1/model"
 run_may_fail "curl -sS -m 8 http://127.0.0.1:5173 | head -c 300"
+
+section "Chat endpoint smoke"
+run_may_fail "curl -sS -m 15 -X POST http://127.0.0.1:8000/api/chat/ -H 'Content-Type: application/json' -d '{\"messages\":[{\"role\":\"user\",\"content\":\"Привет\"}],\"use_memory\":false}'"
 
 section "Port probes"
 run_may_fail "for p in 5001 8000 8001 5173; do echo \"port \$p\"; (echo >/dev/tcp/127.0.0.1/\$p) >/dev/null 2>&1 && echo open || echo closed; done"

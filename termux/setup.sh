@@ -3,6 +3,9 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 PIP_BIN="python -m pip"
 PIP_FLAGS="--prefer-binary"
 
@@ -38,26 +41,26 @@ if [ ! -d "$HOME/roampal-android" ]; then
     git clone https://github.com/Wvwvwvwvwv/jubilant-computing-machine.git roampal-android
 fi
 
-cd "$HOME/roampal-android"
+cd "$PROJECT_ROOT"
 
 # Гарантируем права на запуск termux-скриптов
-chmod +x "$HOME/roampal-android"/termux/*.sh 2>/dev/null || true
+chmod +x "$PROJECT_ROOT"/termux/*.sh 2>/dev/null || true
 
 # Самовосстановление Termux-файлов, если репозиторий локально старый/неполный
 mkdir -p \
-    "$HOME/roampal-android/termux" \
-    "$HOME/roampal-android/backend/core" \
-    "$HOME/roampal-android/backend/sandbox" \
-    "$HOME/roampal-android/backend/embeddings"
+    "$PROJECT_ROOT/termux" \
+    "$PROJECT_ROOT/backend/core" \
+    "$PROJECT_ROOT/backend/sandbox" \
+    "$PROJECT_ROOT/backend/embeddings"
 
-if [ ! -f "$HOME/roampal-android/termux/constraints-termux.txt" ]; then
-    cat > "$HOME/roampal-android/termux/constraints-termux.txt" <<'EOF'
+if [ ! -f "$PROJECT_ROOT/termux/constraints-termux.txt" ]; then
+    cat > "$PROJECT_ROOT/termux/constraints-termux.txt" <<'EOF'
 pydantic==1.10.21
 EOF
 fi
 
-if [ ! -f "$HOME/roampal-android/backend/core/requirements-termux.txt" ]; then
-    cat > "$HOME/roampal-android/backend/core/requirements-termux.txt" <<'EOF'
+if [ ! -f "$PROJECT_ROOT/backend/core/requirements-termux.txt" ]; then
+    cat > "$PROJECT_ROOT/backend/core/requirements-termux.txt" <<'EOF'
 fastapi==0.109.0
 uvicorn==0.27.0
 pydantic==1.10.21
@@ -68,16 +71,16 @@ numpy==1.26.3
 EOF
 fi
 
-if [ ! -f "$HOME/roampal-android/backend/sandbox/requirements-termux.txt" ]; then
-    cat > "$HOME/roampal-android/backend/sandbox/requirements-termux.txt" <<'EOF'
+if [ ! -f "$PROJECT_ROOT/backend/sandbox/requirements-termux.txt" ]; then
+    cat > "$PROJECT_ROOT/backend/sandbox/requirements-termux.txt" <<'EOF'
 fastapi==0.109.0
 uvicorn==0.27.0
 pydantic==1.10.21
 EOF
 fi
 
-if [ ! -f "$HOME/roampal-android/backend/embeddings/requirements-lite-termux.txt" ]; then
-    cat > "$HOME/roampal-android/backend/embeddings/requirements-lite-termux.txt" <<'EOF'
+if [ ! -f "$PROJECT_ROOT/backend/embeddings/requirements-lite-termux.txt" ]; then
+    cat > "$PROJECT_ROOT/backend/embeddings/requirements-lite-termux.txt" <<'EOF'
 fastapi==0.109.0
 uvicorn==0.27.0
 pydantic==1.10.21
@@ -117,26 +120,26 @@ proot-distro login debian -- bash -c "
 
 # Создание директорий
 echo "📁 Создание директорий..."
-mkdir -p "$HOME/roampal-android/models"
-mkdir -p "$HOME/roampal-android/data/memory"
-mkdir -p "$HOME/roampal-android/data/books"
-mkdir -p "$HOME/roampal-android/data/sandbox"
+mkdir -p "$PROJECT_ROOT/models"
+mkdir -p "$PROJECT_ROOT/data/memory"
+mkdir -p "$PROJECT_ROOT/data/books"
+mkdir -p "$PROJECT_ROOT/data/sandbox"
 
 # Установка Python зависимостей для backend
 echo "🐍 Установка Python зависимостей..."
-CONSTRAINTS="$HOME/roampal-android/termux/constraints-termux.txt"
+CONSTRAINTS="$PROJECT_ROOT/termux/constraints-termux.txt"
 
 # Защита от pydantic-core сборки на Termux
 $PIP_BIN uninstall -y pydantic pydantic-core >/dev/null 2>&1 || true
 $PIP_BIN install $PIP_FLAGS -c "$CONSTRAINTS" pydantic==1.10.21
 
-cd "$HOME/roampal-android/backend/core"
+cd "$PROJECT_ROOT/backend/core"
 $PIP_BIN install $PIP_FLAGS -c "$CONSTRAINTS" -r requirements-termux.txt
 
-cd "$HOME/roampal-android/backend/sandbox"
+cd "$PROJECT_ROOT/backend/sandbox"
 $PIP_BIN install $PIP_FLAGS -c "$CONSTRAINTS" -r requirements-termux.txt
 
-cd "$HOME/roampal-android/backend/embeddings"
+cd "$PROJECT_ROOT/backend/embeddings"
 if ! $PIP_BIN install $PIP_FLAGS -c "$CONSTRAINTS" -r requirements.txt; then
     echo "⚠️ Full embeddings deps failed, installing lite Termux profile..."
     $PIP_BIN install $PIP_FLAGS -c "$CONSTRAINTS" -r requirements-lite-termux.txt
@@ -153,7 +156,7 @@ CHECK
 
 # Установка Node.js зависимостей для frontend
 echo "📦 Установка Node.js зависимостей..."
-cd "$HOME/roampal-android/frontend"
+cd "$PROJECT_ROOT/frontend"
 npm install
 
 # Скачивание рекомендуемой модели (опционально)
@@ -169,7 +172,7 @@ fi
 case "$response" in
     [yY]|[yY][eE][sS])
         echo "📥 Скачивание L3-8B-Stheno-v3.2..."
-        cd "$HOME/roampal-android/models"
+        cd "$PROJECT_ROOT/models"
         wget -c https://huggingface.co/bartowski/L3-8B-Stheno-v3.2-GGUF/resolve/main/L3-8B-Stheno-v3.2-Q4_K_M.gguf
         ;;
     *)
