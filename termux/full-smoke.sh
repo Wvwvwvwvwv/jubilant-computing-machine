@@ -3,17 +3,25 @@
 
 set -euo pipefail
 
-PROJECT_ROOT="${HOME}/roampal-android"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FALLBACK_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PROJECT_ROOT="${PROJECT_ROOT:-${HOME}/roampal-android}"
 LOG_DIR="$PROJECT_ROOT/logs"
 
-if [ ! -d "$PROJECT_ROOT" ]; then
-  echo "❌ Проект не найден: $PROJECT_ROOT"
+if [ ! -d "$PROJECT_ROOT" ] || [ ! -d "$PROJECT_ROOT/termux" ]; then
+  PROJECT_ROOT="$FALLBACK_ROOT"
+  LOG_DIR="$PROJECT_ROOT/logs"
+fi
+
+if [ ! -d "$PROJECT_ROOT/termux" ]; then
+  echo "❌ Не найден каталог termux в PROJECT_ROOT: $PROJECT_ROOT"
   exit 1
 fi
 
 cd "$PROJECT_ROOT"
 
 echo "==== Full smoke ===="
+echo "> project: $PROJECT_ROOT"
 echo "> chmod +x termux/*.sh"
 chmod +x termux/*.sh
 
