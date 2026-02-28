@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Send, ThumbsUp, ThumbsDown } from 'lucide-react'
-import { chatAPI } from '../api/client'
+import { chatAPI, getApiErrorMessage } from '../api/client'
 
 interface Message {
   role: 'user' | 'assistant'
@@ -30,12 +30,11 @@ export default function ChatPage() {
         content: response.response,
         id: response.interaction_id
       }])
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Chat error:', error)
-      const detail = error?.response?.data?.detail
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: detail ? `❌ ${detail}` : '❌ Ошибка соединения с сервером'
+        content: getApiErrorMessage(error, 'Ошибка соединения с сервером')
       }])
     } finally {
       setLoading(false)

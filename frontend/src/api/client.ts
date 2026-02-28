@@ -1,5 +1,24 @@
 import axios from 'axios'
 
+
+
+export function getApiErrorMessage(error: unknown, fallback: string): string {
+  if (axios.isAxiosError(error)) {
+    const detail = error.response?.data?.detail
+    const status = error.response?.status
+
+    if (typeof detail === 'string' && detail.trim()) {
+      return `❌ ${detail}`
+    }
+
+    if (status) {
+      return `❌ Ошибка API (${status})`
+    }
+  }
+
+  return `❌ ${fallback}`
+}
+
 const api = axios.create({
   baseURL: '/api',
   timeout: 120000
