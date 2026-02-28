@@ -23,6 +23,7 @@ class ChatResponse(BaseModel):
     response: str
     memory_used: bool
     context_items: int
+    interaction_id: Optional[str] = None
 
 @router.post("/", response_model=ChatResponse)
 async def chat(request: ChatRequest, req: Request):
@@ -59,18 +60,21 @@ async def chat(request: ChatRequest, req: Request):
             temperature=request.temperature
         )
         
+        interaction_id = None
+
         # Сохранение в память для будущего обучения
         if request.use_memory:
-            await memory_engine.add_interaction(
+            interaction_id = await memory_engine.add_interaction(
                 query=request.messages[-1].content,
                 response=response,
                 context_used=memory_context if request.use_memory else []
             )
-        
+
         return ChatResponse(
             response=response,
             memory_used=request.use_memory,
-            context_items=context_items
+            context_items=context_items,
+            interaction_id=interaction_id
         )
         
     except Exception as e:

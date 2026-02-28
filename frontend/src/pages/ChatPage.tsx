@@ -1,48 +1,205 @@
-import { useState } from 'react'
-import { Send, ThumbsUp, ThumbsDown } from 'lucide-react'
-import { chatAPI } from '../api/client'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Send, ThumbsUp, ThumbsDown, Plus, Upload, Trash2, MessageSquare } from 'lucide-react'
+import { booksAPI, chatAPI, extractApiError } from '../api/client'
 
 interface Message {
   role: 'user' | 'assistant'
   content: string
-  id?: string
+  id: string
+  interactionId?: string
+}
+
+interface Conversation {
+  id: string
+  title: string
+  messages: Message[]
+  useMemory: boolean
+  updatedAt: number
+}
+
+interface BookItem {
+  id: string
+  filename: string
+  size: number
+  modified: number
+}
+
+const STORAGE_KEY = 'roampal_chat_conversations'
+const ACTIVE_KEY = 'roampal_chat_active_id'
+
+function createConversation(title: string = 'Новый диалог'): Conversation {
+  const now = Date.now()
+  return {
+    id: `${now}-${Math.random().toString(16).slice(2)}`,
+    title,
+    messages: [],
+    useMemory: true,
+    updatedAt: now
+  }
+}
+
+function createMessage(
+  role: Message['role'],
+  content: string,
+  options?: { id?: string; interactionId?: string }
+): Message {
+  return {
+    role,
+    content,
+    id: options?.id ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    interactionId: options?.interactionId
+  }
+}
+
+function normalizeConversation(raw: any): Conversation | null {
+  if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string') return null
+  const messages = Array.isArray(raw.messages)
+    ? raw.messages
+        .map((message: any) => {
+          if (!message || typeof message !== 'object') return null
+          if ((message.role !== 'user' && message.role !== 'assistant') || typeof message.content !== 'string') return null
+          return createMessage(message.role, message.content, {
+            id: typeof message.id === 'string' ? message.id : undefined,
+            interactionId: typeof message.interactionId === 'string' ? message.interactionId : undefined
+          })
+        })
+        .filter((message: Message | null): message is Message => Boolean(message))
+    : []
+
+  return {
+    id: raw.id,
+    title: typeof raw.title === 'string' ? raw.title : 'Новый диалог',
+    messages,
+    useMemory: typeof raw.useMemory === 'boolean' ? raw.useMemory : true,
+    updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : Date.now()
+  }
 }
 
 export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>([])
+  const [conversations, setConversations] = useState<Conversation[]>([])
+  const [activeConversationId, setActiveConversationId] = useState<string>('')
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [useMemory, setUseMemory] = useState(true)
+  const [showMenu, setShowMenu] = useState(false)
+  const [showDialogs, setShowDialogs] = useState(true)
+  const [showBooks, setShowBooks] = useState(false)
+  const [books, setBooks] = useState<BookItem[]>([])
+  const [menuError, setMenuError] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY)
+      const parsed = raw ? JSON.parse(raw) : []
+      const valid = Array.isArray(parsed)
+        ? parsed
+            .map(normalizeConversation)
+            .filter((conversation): conversation is Conversation => Boolean(conversation))
+        : []
+
+      if (valid.length > 0) {
+        setConversations(valid)
+        const storedActive = localStorage.getItem(ACTIVE_KEY)
+        const exists = storedActive && valid.some(c => c.id === storedActive)
+        setActiveConversationId(exists ? storedActive! : valid[0].id)
+      } else {
+        const initial = createConversation('Диалог 1')
+        setConversations([initial])
+        setActiveConversationId(initial.id)
+      }
+    } catch {
+      const initial = createConversation('Диалог 1')
+      setConversations([initial])
+      setActiveConversationId(initial.id)
+    }
+  }, [])
+
+  useEffect(() => {
+    const syncConversations = (event: StorageEvent) => {
+      if (event.key !== STORAGE_KEY || event.storageArea !== localStorage) return
+      try {
+        const parsed = event.newValue ? JSON.parse(event.newValue) : []
+        const synced = Array.isArray(parsed)
+          ? parsed
+              .map(normalizeConversation)
+              .filter((conversation): conversation is Conversation => Boolean(conversation))
+          : []
+
+        if (!synced.length) return
+        setConversations(synced)
+        setActiveConversationId(current =>
+          synced.some(c => c.id === current) ? current : synced[0].id
+        )
+      } catch {
+        // ignore invalid data from another tab
+      }
+    }
+
+    window.addEventListener('storage', syncConversations)
+    return () => window.removeEventListener('storage', syncConversations)
+  }, [])
+
+  useEffect(() => {
+    if (!conversations.length) return
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations))
+  }, [conversations])
+
+  useEffect(() => {
+    if (!activeConversationId) return
+    localStorage.setItem(ACTIVE_KEY, activeConversationId)
+  }, [activeConversationId])
+
+  const activeConversation = useMemo(
+    () => conversations.find(c => c.id === activeConversationId) ?? conversations[0],
+    [conversations, activeConversationId]
+  )
+
+  const dialogList = useMemo(
+    () => [...conversations].sort((a, b) => b.updatedAt - a.updatedAt),
+    [conversations]
+  )
+
+  const updateActiveConversation = (updater: (conv: Conversation) => Conversation) => {
+    if (!activeConversation) return
+    setConversations(prev => prev.map(c => (c.id === activeConversation.id ? updater(c) : c)))
+  }
 
   const sendMessage = async () => {
-    if (!input.trim() || loading) return
+    if (!input.trim() || loading || !activeConversation) return
 
-    const userMessage: Message = { role: 'user', content: input }
-    setMessages(prev => [...prev, userMessage])
+    const userMessage = createMessage('user', input)
+    const nextMessages = [...activeConversation.messages, userMessage]
+
+    updateActiveConversation(c => ({
+      ...c,
+      messages: nextMessages,
+      title: c.messages.length === 0 ? userMessage.content.slice(0, 40) || 'Новый диалог' : c.title,
+      updatedAt: Date.now()
+    }))
+
     setInput('')
     setLoading(true)
 
     try {
-      const response = await chatAPI.send([...messages, userMessage], useMemory)
-      
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: response.response,
-        id: response.interaction_id
-      }])
+      const response = await chatAPI.send(nextMessages, activeConversation.useMemory)
+      updateActiveConversation(c => ({
+        ...c,
+        messages: [...c.messages, createMessage('assistant', response.response, { interactionId: response.interaction_id })],
+        updatedAt: Date.now()
+      }))
     } catch (error: any) {
-      console.error('Chat error:', error)
-      const detail = error?.response?.data?.detail
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: detail ? `❌ ${detail}` : '❌ Ошибка соединения с сервером'
-      }])
+      updateActiveConversation(c => ({
+        ...c,
+        messages: [...c.messages, createMessage('assistant', `❌ ${extractApiError(error)}`)],
+        updatedAt: Date.now()
+      }))
     } finally {
       setLoading(false)
     }
   }
 
-  const handleFeedback = async (messageId: string, helpful: boolean) => {
+  const handleFeedback = async (messageId: string | undefined, helpful: boolean) => {
+    if (!messageId) return
     try {
       await chatAPI.feedback(messageId, helpful)
     } catch (error) {
@@ -50,9 +207,78 @@ export default function ChatPage() {
     }
   }
 
+  const createNewDialog = () => {
+    const number = conversations.length + 1
+    const fresh = createConversation(`Диалог ${number}`)
+    setConversations(prev => [fresh, ...prev])
+    setActiveConversationId(fresh.id)
+  }
+
+  const removeDialog = (dialogId: string) => {
+    if (conversations.length <= 1) {
+      setMenuError('Нельзя удалить последний диалог.')
+      return
+    }
+    const target = conversations.find(d => d.id === dialogId)
+    if (!target) return
+    if (!window.confirm(`Удалить диалог "${target.title || 'Без названия'}"?`)) return
+
+    const next = conversations.filter(c => c.id !== dialogId)
+    setConversations(next)
+    if (activeConversationId === dialogId) {
+      setActiveConversationId(next[0].id)
+    }
+  }
+
+  const loadBooks = async () => {
+    try {
+      const data = await booksAPI.list()
+      setBooks(data.books || [])
+      setMenuError('')
+    } catch (error: any) {
+      setMenuError(extractApiError(error))
+    }
+  }
+
+  const openBooksPanel = async () => {
+    setShowBooks(true)
+    setShowDialogs(false)
+    await loadBooks()
+  }
+
+  const uploadBook = async (file?: File) => {
+    if (!file) return
+    try {
+      await booksAPI.upload(file)
+      await loadBooks()
+      setMenuError('')
+    } catch (error: any) {
+      setMenuError(extractApiError(error))
+    }
+  }
+
+  const deleteBook = async (bookId: string) => {
+    const target = books.find(b => b.id === bookId)
+    if (!target) return
+    if (!window.confirm(`Удалить книгу "${target.filename}"?`)) return
+
+    try {
+      await booksAPI.delete(bookId)
+      await loadBooks()
+      setMenuError('')
+    } catch (error: any) {
+      setMenuError(extractApiError(error))
+    }
+  }
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Messages */}
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
+      <div style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #222', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ color: '#aaa', fontSize: '0.85rem', maxWidth: '80%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {activeConversation?.title || 'Диалог'}
+        </div>
+      </div>
+
       <div style={{
         flex: 1,
         overflowY: 'auto',
@@ -61,9 +287,9 @@ export default function ChatPage() {
         flexDirection: 'column',
         gap: '1rem'
       }}>
-        {messages.map((msg, idx) => (
+        {(activeConversation?.messages || []).map((msg) => (
           <div
-            key={idx}
+            key={msg.id}
             style={{
               alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
               maxWidth: '80%'
@@ -77,8 +303,8 @@ export default function ChatPage() {
             }}>
               {msg.content}
             </div>
-            
-            {msg.role === 'assistant' && msg.id && (
+
+            {msg.role === 'assistant' && msg.interactionId && (
               <div style={{
                 display: 'flex',
                 gap: '0.5rem',
@@ -86,7 +312,7 @@ export default function ChatPage() {
                 fontSize: '0.875rem'
               }}>
                 <button
-                  onClick={() => handleFeedback(msg.id!, true)}
+                  onClick={() => handleFeedback(msg.interactionId, true)}
                   style={{
                     background: 'transparent',
                     border: '1px solid #333',
@@ -99,7 +325,7 @@ export default function ChatPage() {
                   <ThumbsUp size={14} />
                 </button>
                 <button
-                  onClick={() => handleFeedback(msg.id!, false)}
+                  onClick={() => handleFeedback(msg.interactionId, false)}
                   style={{
                     background: 'transparent',
                     border: '1px solid #333',
@@ -115,7 +341,7 @@ export default function ChatPage() {
             )}
           </div>
         ))}
-        
+
         {loading && (
           <div style={{ alignSelf: 'flex-start' }}>
             <div style={{
@@ -129,7 +355,6 @@ export default function ChatPage() {
         )}
       </div>
 
-      {/* Input */}
       <div style={{
         padding: '1rem',
         borderTop: '1px solid #222',
@@ -140,17 +365,17 @@ export default function ChatPage() {
         <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem' }}>
           <input
             type="checkbox"
-            checked={useMemory}
-            onChange={(e) => setUseMemory(e.target.checked)}
+            checked={activeConversation?.useMemory ?? true}
+            onChange={(e) => updateActiveConversation(c => ({ ...c, useMemory: e.target.checked, updatedAt: Date.now() }))}
           />
           Память
         </label>
-        
+
         <input
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+          onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
           placeholder="Сообщение..."
           style={{
             flex: 1,
@@ -162,7 +387,7 @@ export default function ChatPage() {
             outline: 'none'
           }}
         />
-        
+
         <button
           onClick={sendMessage}
           disabled={loading || !input.trim()}
@@ -182,6 +407,160 @@ export default function ChatPage() {
           <Send size={20} />
         </button>
       </div>
+
+      {showMenu && (
+        <div style={{
+          position: 'absolute',
+          right: '1rem',
+          bottom: '5.5rem',
+          width: '20rem',
+          maxHeight: '60%',
+          overflowY: 'auto',
+          background: '#111',
+          border: '1px solid #333',
+          borderRadius: '0.75rem',
+          padding: '0.75rem',
+          boxShadow: '0 10px 25px rgba(0,0,0,.45)',
+          zIndex: 10,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '0.5rem'
+        }}>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button
+              onClick={() => {
+                createNewDialog()
+                setShowDialogs(true)
+                setShowBooks(false)
+                setMenuError('')
+              }}
+              style={{ flex: 1, background: '#2563eb', border: 'none', color: '#fff', borderRadius: '0.5rem', padding: '0.45rem', cursor: 'pointer' }}
+            >
+              + Новый диалог
+            </button>
+            <button
+              onClick={() => {
+                setShowDialogs(true)
+                setShowBooks(false)
+                setMenuError('')
+              }}
+              style={{ background: '#1f2937', border: '1px solid #374151', color: '#fff', borderRadius: '0.5rem', padding: '0.45rem', cursor: 'pointer' }}
+              title="Диалоги"
+            >
+              <MessageSquare size={16} />
+            </button>
+            <button
+              onClick={openBooksPanel}
+              style={{ background: '#1f2937', border: '1px solid #374151', color: '#fff', borderRadius: '0.5rem', padding: '0.45rem', cursor: 'pointer' }}
+              title="Литература"
+            >
+              <Upload size={16} />
+            </button>
+          </div>
+
+          {menuError && <div style={{ color: '#fca5a5', fontSize: '0.8rem' }}>❌ {menuError}</div>}
+
+          {showDialogs && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+              {dialogList.map(dialog => (
+                <div key={dialog.id} style={{ display: 'flex', gap: '0.4rem' }}>
+                  <button
+                    onClick={() => {
+                      setActiveConversationId(dialog.id)
+                      setShowMenu(false)
+                    }}
+                    style={{
+                      flex: 1,
+                      background: dialog.id === activeConversation?.id ? '#1e3a8a' : '#1a1a1a',
+                      border: '1px solid #333',
+                      borderRadius: '0.5rem',
+                      color: '#fff',
+                      padding: '0.45rem',
+                      textAlign: 'left',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {dialog.title || 'Без названия'}
+                  </button>
+                  <button
+                    onClick={() => removeDialog(dialog.id)}
+                    style={{ background: '#2b1111', border: '1px solid #7f1d1d', borderRadius: '0.5rem', color: '#fca5a5', padding: '0.35rem 0.5rem', cursor: 'pointer' }}
+                    title="Удалить диалог"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {showBooks && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                style={{ background: '#2563eb', border: 'none', color: '#fff', borderRadius: '0.5rem', padding: '0.45rem', cursor: 'pointer' }}
+              >
+                Загрузить литературу
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".txt,.md,.html,.htm,.fb2,.pdf,text/plain,text/markdown,text/html,application/xhtml+xml,application/pdf,application/xml,text/xml,*/*"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  uploadBook(e.target.files?.[0])
+                  e.currentTarget.value = ''
+                }}
+              />
+              {books.map(book => (
+                <div key={book.id} style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                  <div style={{ flex: 1, background: '#1a1a1a', border: '1px solid #333', borderRadius: '0.5rem', padding: '0.45rem', color: '#ddd', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {book.filename}
+                  </div>
+                  <button
+                    onClick={() => deleteBook(book.id)}
+                    style={{ background: '#2b1111', border: '1px solid #7f1d1d', borderRadius: '0.5rem', color: '#fca5a5', padding: '0.35rem 0.5rem', cursor: 'pointer' }}
+                    title="Удалить литературу"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <button
+        onClick={() => {
+          setShowMenu(prev => !prev)
+          if (!showMenu) {
+            setShowDialogs(true)
+            setShowBooks(false)
+            setMenuError('')
+          }
+        }}
+        style={{
+          position: 'absolute',
+          right: '1rem',
+          bottom: '1rem',
+          width: '3.2rem',
+          height: '3.2rem',
+          borderRadius: '50%',
+          border: 'none',
+          background: '#2563eb',
+          color: '#fff',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: '0 8px 20px rgba(37,99,235,.45)',
+          cursor: 'pointer',
+          zIndex: 11
+        }}
+        title="Меню"
+      >
+        <Plus size={22} />
+      </button>
     </div>
   )
 }

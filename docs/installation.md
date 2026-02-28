@@ -188,8 +188,16 @@ git pull
 bash termux/start-services.sh
 ```
 
+### Зафиксировать рабочее состояние (на случай отката)
 
+```bash
+cd ~/roampal-android
+git checkout -b backup/chat-fix-$(date +%Y%m%d-%H%M)
+git tag -a stable-chat-fix -m "Working chat fix (ChatMessage + Kobold formatter)"
+```
 
+Скрипт `termux/start-services.sh` теперь выполняет preflight-проверку
+`termux/verify-chat-fix.sh` и не даст запустить сервисы, если критичный фикc чата отсутствует.
 
 Если фронт видит `❌ Ошибка соединения с сервером`, можно явно задать proxy target для Vite:
 
