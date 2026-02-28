@@ -1,13 +1,22 @@
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional, List
-import httpx
+import logging
 
 from services.kobold_client import KoboldClient
 from services.memory_engine import MemoryEngine
 
 router = APIRouter()
 kobold = KoboldClient()
+logger = logging.getLogger(__name__)
+
+
+def _serialize_message(msg: "ChatMessage") -> dict:
+    """Совместимость Pydantic v1/v2: приводим сообщение к dict перед отправкой в сервисы."""
+
+    if hasattr(msg, "model_dump"):
+        return msg.model_dump()
+    return msg.dict()
 
 class ChatMessage(BaseModel):
     role: str
@@ -21,18 +30,26 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     response: str
+    interaction_id: Optional[str] = None
     memory_used: bool
     context_items: int
 
 @router.post("/", response_model=ChatResponse)
 async def chat(request: ChatRequest, req: Request):
     """Чат с LLM через KoboldCpp с использованием памяти Roampal"""
+
+    if not request.messages:
+        raise HTTPException(status_code=400, detail="messages must not be empty")
     
     memory_engine: MemoryEngine = req.app.state.memory_engine
     context_items = 0
+    memory_context = []
+    outbound_messages = list(request.messages)
     
     # Получение релевантного контекста из памяти
-    if request.use_memory and len(request.messages) > 0:
+    last_user_message = request.messages[-1].content
+
+    if request.use_memory:
         last_message = request.messages[-1].content
         memory_context = await memory_engine.search(last_message, limit=5)
         context_items = len(memory_context)
@@ -49,32 +66,40 @@ async def chat(request: ChatRequest, req: Request):
                 role="system",
                 content=f"Релевантный контекст из памяти:\n{context_text}"
             )
-            request.messages.insert(-1, system_msg)
+            outbound_messages.insert(-1, system_msg)
     
     # Отправка в KoboldCpp
     try:
+        serialized_messages = [_serialize_message(msg) for msg in outbound_messages]
+
         response = await kobold.generate(
-            messages=request.messages,
+            messages=serialized_messages,
             max_tokens=request.max_tokens,
             temperature=request.temperature
         )
         
         # Сохранение в память для будущего обучения
+        interaction_id = None
         if request.use_memory:
-            await memory_engine.add_interaction(
-                query=request.messages[-1].content,
+            interaction_id = await memory_engine.add_interaction(
+                query=last_user_message,
                 response=response,
-                context_used=memory_context if request.use_memory else []
+                context_used=memory_context
             )
         
         return ChatResponse(
             response=response,
+            interaction_id=interaction_id,
             memory_used=request.use_memory,
             context_items=context_items
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ошибка генерации: {str(e)}")
+        detail = str(e)
+        logger.exception("Chat generation failed")
+        if "KoboldCpp unavailable" in detail:
+            raise HTTPException(status_code=503, detail=f"Kobold недоступен: {detail}")
+        raise HTTPException(status_code=500, detail=f"Ошибка генерации: {detail}")
 
 @router.post("/feedback")
 async def feedback(

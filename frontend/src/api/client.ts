@@ -1,5 +1,16 @@
 import axios from 'axios'
 
+export const getApiErrorDetail = (error: any, fallback: string) => {
+  const detail = error?.response?.data?.detail
+  if (typeof detail === 'string' && detail.trim()) return detail
+  if (Array.isArray(detail)) {
+    const first = detail[0]
+    if (typeof first?.msg === 'string') return first.msg
+  }
+  if (typeof error?.message === 'string' && error.message.trim()) return error.message
+  return fallback
+}
+
 const api = axios.create({
   baseURL: '/api',
   timeout: 120000

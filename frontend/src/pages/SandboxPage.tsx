@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Play, Trash2 } from 'lucide-react'
-import { sandboxAPI } from '../api/client'
+import { getApiErrorDetail, sandboxAPI } from '../api/client'
 
 export default function SandboxPage() {
   const [code, setCode] = useState('print("Hello from Roampal!")')
@@ -24,7 +24,7 @@ export default function SandboxPage() {
       
       setOutput(outputText || 'Нет вывода')
     } catch (error: any) {
-      setOutput(`❌ Ошибка: ${error.message}`)
+      setOutput(`❌ Ошибка: ${getApiErrorDetail(error, 'Не удалось выполнить код')}`)
     } finally {
       setLoading(false)
     }

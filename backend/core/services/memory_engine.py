@@ -47,6 +47,13 @@ class MemoryEngine:
         self.client = None
         self.collection = None
 
+    def _disable_chroma(self):
+        """Переключение на in-memory backend при runtime-сбое Chroma."""
+
+        self.chroma_available = False
+        self.client = None
+        self.collection = None
+
     async def add_memory(self, content: str, metadata: Optional[Dict] = None) -> str:
         """Добавить элемент в память"""
 
@@ -54,8 +61,11 @@ class MemoryEngine:
         meta = metadata or {}
 
         if self.chroma_available and self.collection is not None:
-            self.collection.add(documents=[content], ids=[memory_id], metadatas=[meta])
-            return memory_id
+            try:
+                self.collection.add(documents=[content], ids=[memory_id], metadatas=[meta])
+                return memory_id
+            except Exception:
+                self._disable_chroma()
 
         self.in_memory_store[memory_id] = {
             "id": memory_id,
@@ -81,7 +91,18 @@ class MemoryEngine:
         text = f"Q: {query}\nA: {response}"
 
         if self.chroma_available and self.collection is not None:
-            self.collection.add(documents=[text], ids=[interaction_id], metadatas=[interaction_meta])
+            try:
+                self.collection.add(documents=[text], ids=[interaction_id], metadatas=[interaction_meta])
+            except Exception:
+                self._disable_chroma()
+                self.in_memory_store[interaction_id] = {
+                    "id": interaction_id,
+                    "content": text,
+                    "metadata": interaction_meta,
+                    "timestamp": interaction_meta["timestamp"],
+                    "outcome_score": 0.0,
+                    "type": "interaction",
+                }
         else:
             self.in_memory_store[interaction_id] = {
                 "id": interaction_id,
@@ -105,7 +126,11 @@ class MemoryEngine:
         """Записать результат (outcome-based learning)"""
 
         if self.chroma_available and self.collection is not None:
-            result = self.collection.get(ids=[interaction_id])
+            try:
+                result = self.collection.get(ids=[interaction_id])
+            except Exception:
+                self._disable_chroma()
+                result = {"ids": []}
             if not result["ids"]:
                 raise ValueError("Interaction not found")
 
@@ -117,7 +142,11 @@ class MemoryEngine:
             metadata["outcome_score"] = new_score
             metadata["last_feedback"] = time.time()
 
-            self.collection.update(ids=[interaction_id], metadatas=[metadata])
+            try:
+                self.collection.update(ids=[interaction_id], metadatas=[metadata])
+            except Exception:
+                self._disable_chroma()
+                raise ValueError("Interaction update failed")
 
             if new_score < -0.5:
                 await self.delete_memory(interaction_id)
@@ -140,7 +169,11 @@ class MemoryEngine:
         """Поиск с учетом outcome scores"""
 
         if self.chroma_available and self.collection is not None:
-            results = self.collection.query(query_texts=[query], n_results=limit * 3)
+            try:
+                results = self.collection.query(query_texts=[query], n_results=limit * 3)
+            except Exception:
+                self._disable_chroma()
+                results = {"ids": [[]]}
             if not results["ids"] or not results["ids"][0]:
                 return []
 
@@ -195,7 +228,11 @@ class MemoryEngine:
         """Удалить элемент из памяти"""
 
         if self.chroma_available and self.collection is not None:
-            self.collection.delete(ids=[memory_id])
+            try:
+                self.collection.delete(ids=[memory_id])
+            except Exception:
+                self._disable_chroma()
+                self.in_memory_store.pop(memory_id, None)
         else:
             self.in_memory_store.pop(memory_id, None)
 
@@ -206,14 +243,20 @@ class MemoryEngine:
         """Статистика памяти"""
 
         if self.chroma_available and self.collection is not None:
-            count = self.collection.count()
-            all_items = self.collection.get()
+            try:
+                count = self.collection.count()
+                all_items = self.collection.get()
+            except Exception:
+                self._disable_chroma()
+                count = len(self.in_memory_store)
+                all_items = {"metadatas": [item.get("metadata", {}) for item in self.in_memory_store.values()]}
             interactions = sum(1 for m in all_items["metadatas"] if m.get("type") == "interaction")
+            backend = "chromadb" if self.chroma_available and self.collection is not None else "in_memory"
             return {
                 "total_items": count,
                 "interactions": interactions,
                 "permanent_memories": count - interactions,
-                "backend": "chromadb",
+                "backend": backend,
             }
 
         count = len(self.in_memory_store)

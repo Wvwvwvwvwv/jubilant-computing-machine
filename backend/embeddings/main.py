@@ -3,6 +3,8 @@ from pydantic import BaseModel
 from typing import List
 import asyncio
 import os
+import hashlib
+import math
 import uvicorn
 
 try:
@@ -22,6 +24,32 @@ model = None
 model_loading = False
 model_error = None
 MODEL_NAME = os.getenv("EMBEDDINGS_MODEL", "all-MiniLM-L6-v2")
+FALLBACK_DIM = int(os.getenv("EMBEDDINGS_FALLBACK_DIM", "384"))
+
+
+def _fallback_encode(texts: List[str], dim: int = FALLBACK_DIM) -> List[List[float]]:
+    """Детерминированный lite-fallback, если model недоступна."""
+
+    vectors: List[List[float]] = []
+    for text in texts:
+        vec = [0.0] * dim
+        normalized = (text or "").strip().lower()
+        if not normalized:
+            vectors.append(vec)
+            continue
+
+        for token in normalized.split():
+            h = hashlib.sha256(token.encode("utf-8")).hexdigest()
+            idx = int(h[:8], 16) % dim
+            sign = -1.0 if int(h[8:10], 16) % 2 else 1.0
+            vec[idx] += sign
+
+        norm = math.sqrt(sum(x * x for x in vec))
+        if norm > 0:
+            vec = [x / norm for x in vec]
+        vectors.append(vec)
+
+    return vectors
 
 
 async def _load_model():
@@ -64,13 +92,19 @@ class EmbedResponse(BaseModel):
 async def embed_texts(request: EmbedRequest):
     """Генерация эмбеддингов для текстов"""
 
+    if not request.texts:
+        raise HTTPException(status_code=400, detail="texts must not be empty")
+
     if not model:
-        detail = "Model not loaded"
         if model_loading:
-            detail = "Model is still loading"
-        elif model_error:
-            detail = f"Model unavailable: {model_error}"
-        raise HTTPException(status_code=503, detail=detail)
+            raise HTTPException(status_code=503, detail="Model is still loading")
+
+        embeddings = _fallback_encode(request.texts)
+        return EmbedResponse(
+            embeddings=embeddings,
+            model=f"fallback-hash:{MODEL_NAME}",
+            dimension=FALLBACK_DIM,
+        )
 
     try:
         embeddings = model.encode(
@@ -100,12 +134,16 @@ async def root():
 
 @app.get("/health")
 async def health():
+    healthy = model is not None
+    status = "healthy" if healthy else "degraded"
     return {
-        "status": "healthy",
-        "model_loaded": model is not None,
+        "status": status,
+        "model_loaded": healthy,
         "model": MODEL_NAME,
         "error": model_error,
         "loading": model_loading,
+        "fallback_active": not healthy and not model_loading,
+        "fallback_dimension": FALLBACK_DIM,
         "sentence_transformers_available": SentenceTransformer is not None,
     }
 

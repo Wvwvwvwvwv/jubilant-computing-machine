@@ -1,5 +1,6 @@
 import httpx
-from typing import List, Dict
+from typing import Any, Dict, List
+
 
 class KoboldClient:
     """Клиент для KoboldCpp API"""
@@ -10,7 +11,7 @@ class KoboldClient:
     
     async def generate(
         self,
-        messages: List[Dict],
+        messages: List[Any],
         max_tokens: int = 512,
         temperature: float = 0.7,
         top_p: float = 0.9,
@@ -37,20 +38,38 @@ class KoboldClient:
                 json=payload
             )
             response.raise_for_status()
-            
+
             result = response.json()
-            return result["results"][0]["text"].strip()
-            
+            results = result.get("results") if isinstance(result, dict) else None
+            if not results or not isinstance(results, list) or "text" not in results[0]:
+                raise RuntimeError(f"KoboldCpp invalid response: {result}")
+            return str(results[0]["text"]).strip()
+
+        except httpx.ConnectError as e:
+            raise RuntimeError(f"KoboldCpp unavailable at {self.base_url}: {e}")
+        except httpx.HTTPStatusError as e:
+            detail = e.response.text[:500] if e.response is not None else str(e)
+            raise RuntimeError(f"KoboldCpp HTTP {e.response.status_code if e.response else 'error'}: {detail}")
         except httpx.HTTPError as e:
-            raise Exception(f"KoboldCpp error: {str(e)}")
+            raise RuntimeError(f"KoboldCpp transport error: {e}")
     
-    def _format_messages(self, messages: List[Dict]) -> str:
+    @staticmethod
+    def _msg_field(msg: Any, field: str, default: Any = None) -> Any:
+        """Совместимость с dict и Pydantic-объектами сообщений."""
+
+        if isinstance(msg, dict):
+            return msg.get(field, default)
+
+        value = getattr(msg, field, default)
+        return default if value is None else value
+
+    def _format_messages(self, messages: List[Any]) -> str:
         """Форматирование сообщений в промпт"""
         
         formatted = []
         for msg in messages:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
+            role = self._msg_field(msg, "role", "user")
+            content = self._msg_field(msg, "content", "")
             
             if role == "system":
                 formatted.append(f"System: {content}")
