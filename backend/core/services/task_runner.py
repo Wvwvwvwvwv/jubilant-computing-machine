@@ -37,12 +37,11 @@ class TaskRecord:
     updated_at: float
     events: List[TaskEvent] = field(default_factory=list)
     last_error: Optional[str] = None
+    approval_required: bool = False
+    approved: bool = False
 
 
 class TaskRunner:
-    """
-    Minimal in-memory task runner scaffold.
-    """
     def __init__(self):
         self.tasks: Dict[str, TaskRecord] = {}
         self.log_path = Path(__file__).resolve().parents[1] / "logs" / "task_audit.log"
@@ -59,7 +58,12 @@ class TaskRunner:
         with self.log_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
-    def create_task(self, goal: str, max_attempts: int = 3) -> TaskRecord:
+    def _event(self, rec: TaskRecord, kind: str, message: str, payload: Optional[dict] = None):
+        rec.updated_at = time.time()
+        rec.events.append(TaskEvent(ts=rec.updated_at, kind=kind, message=message, payload=payload or {}))
+        self._audit(rec.task_id, kind, message, payload or {})
+
+    def create_task(self, goal: str, max_attempts: int = 3, approval_required: bool = False) -> TaskRecord:
         task_id = str(uuid.uuid4())
         now = time.time()
         rec = TaskRecord(
@@ -70,10 +74,19 @@ class TaskRunner:
             max_attempts=max(1, min(max_attempts, 10)),
             created_at=now,
             updated_at=now,
+            approval_required=approval_required,
+            approved=not approval_required,
         )
-        rec.events.append(TaskEvent(ts=now, kind="task_created", message="Task created"))
         self.tasks[task_id] = rec
-        self._audit(task_id, "task_created", "Task created", {"goal": goal, "max_attempts": rec.max_attempts})
+        self._event(
+            rec,
+            "task_created",
+            "Task created",
+            {"goal": goal, "max_attempts": rec.max_attempts, "approval_required": approval_required},
+        )
+        if approval_required:
+            rec.status = TaskStatus.NEEDS_APPROVAL
+            self._event(rec, "task_needs_approval", "Task requires explicit user approval")
         return rec
 
     def get_task(self, task_id: str) -> Optional[TaskRecord]:
@@ -83,35 +96,43 @@ class TaskRunner:
         items = sorted(self.tasks.values(), key=lambda x: x.updated_at, reverse=True)
         return items[: max(1, min(limit, 200))]
 
-    def start_task(self, task_id: str) -> TaskRecord:
+    def approve_task(self, task_id: str) -> TaskRecord:
         rec = self.tasks[task_id]
+        rec.approved = True
+        if rec.status == TaskStatus.NEEDS_APPROVAL:
+            rec.status = TaskStatus.PENDING
+        self._event(rec, "task_approved", "Task approved by user")
+        return rec
+
+    def run_once(self, task_id: str) -> TaskRecord:
+        rec = self.tasks[task_id]
+
+        if rec.approval_required and not rec.approved:
+            rec.status = TaskStatus.NEEDS_APPROVAL
+            self._event(rec, "task_blocked", "Approval required before run")
+            return rec
+
+        if rec.status in {TaskStatus.SUCCESS, TaskStatus.FAILED}:
+            self._event(rec, "task_skip", f"Task already terminal: {rec.status.value}")
+            return rec
+
         rec.status = TaskStatus.RUNNING
-        rec.updated_at = time.time()
-        rec.events.append(TaskEvent(ts=rec.updated_at, kind="task_started", message="Task started"))
-        self._audit(task_id, "task_started", "Task started")
-        return rec
+        self._event(rec, "task_started", "Task run started", {"attempt": rec.attempt + 1})
 
-    def mark_retry(self, task_id: str, error: str) -> TaskRecord:
-        rec = self.tasks[task_id]
-        rec.attempt += 1
-        rec.last_error = error
-        rec.updated_at = time.time()
+        # Минимальный симулятор цикла:
+        # если goal содержит "fail" -> считаем ошибкой и ретраем; иначе success
+        goal_lower = rec.goal.lower()
+        if "fail" in goal_lower or "ошибка" in goal_lower:
+            rec.attempt += 1
+            rec.last_error = "Simulated execution error"
+            if rec.attempt >= rec.max_attempts:
+                rec.status = TaskStatus.FAILED
+                self._event(rec, "task_failed", rec.last_error, {"attempt": rec.attempt})
+            else:
+                rec.status = TaskStatus.RETRYING
+                self._event(rec, "task_retry", rec.last_error, {"attempt": rec.attempt})
+            return rec
 
-        if rec.attempt >= rec.max_attempts:
-            rec.status = TaskStatus.FAILED
-            rec.events.append(TaskEvent(ts=rec.updated_at, kind="task_failed", message=error))
-            self._audit(task_id, "task_failed", error, {"attempt": rec.attempt})
-        else:
-            rec.status = TaskStatus.RETRYING
-            rec.events.append(TaskEvent(ts=rec.updated_at, kind="task_retry", message=error))
-            self._audit(task_id, "task_retry", error, {"attempt": rec.attempt})
-
-        return rec
-
-    def mark_success(self, task_id: str, note: str = "Task succeeded") -> TaskRecord:
-        rec = self.tasks[task_id]
         rec.status = TaskStatus.SUCCESS
-        rec.updated_at = time.time()
-        rec.events.append(TaskEvent(ts=rec.updated_at, kind="task_success", message=note))
-        self._audit(task_id, "task_success", note)
+        self._event(rec, "task_success", "Task succeeded")
         return rec

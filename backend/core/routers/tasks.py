@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
-from services.task_runner import TaskRunner, TaskRecord, TaskEvent
+from services.task_runner import TaskRunner, TaskRecord
 
 router = APIRouter()
 
@@ -10,6 +10,7 @@ router = APIRouter()
 class TaskCreateRequest(BaseModel):
     goal: str = Field(..., min_length=3, max_length=4000)
     max_attempts: int = Field(3, ge=1, le=10)
+    approval_required: bool = False
 
 
 class TaskEventResponse(BaseModel):
@@ -28,6 +29,8 @@ class TaskResponse(BaseModel):
     created_at: float
     updated_at: float
     last_error: Optional[str] = None
+    approval_required: bool
+    approved: bool
     events: List[TaskEventResponse]
 
 
@@ -46,6 +49,8 @@ def to_response(rec: TaskRecord) -> TaskResponse:
         created_at=rec.created_at,
         updated_at=rec.updated_at,
         last_error=rec.last_error,
+        approval_required=rec.approval_required,
+        approved=rec.approved,
         events=[
             TaskEventResponse(ts=e.ts, kind=e.kind, message=e.message, payload=e.payload)
             for e in rec.events
@@ -56,8 +61,30 @@ def to_response(rec: TaskRecord) -> TaskResponse:
 @router.post("/", response_model=TaskResponse)
 async def create_task(body: TaskCreateRequest, req: Request):
     runner: TaskRunner = req.app.state.task_runner
-    rec = runner.create_task(goal=body.goal, max_attempts=body.max_attempts)
+    rec = runner.create_task(
+        goal=body.goal,
+        max_attempts=body.max_attempts,
+        approval_required=body.approval_required,
+    )
     return to_response(rec)
+
+
+@router.post("/{task_id}/approve", response_model=TaskResponse)
+async def approve_task(task_id: str, req: Request):
+    runner: TaskRunner = req.app.state.task_runner
+    rec = runner.get_task(task_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return to_response(runner.approve_task(task_id))
+
+
+@router.post("/{task_id}/run", response_model=TaskResponse)
+async def run_task(task_id: str, req: Request):
+    runner: TaskRunner = req.app.state.task_runner
+    rec = runner.get_task(task_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return to_response(runner.run_once(task_id))
 
 
 @router.get("/{task_id}", response_model=TaskResponse)
