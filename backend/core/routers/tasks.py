@@ -29,6 +29,7 @@ class TaskResponse(BaseModel):
     created_at: float
     updated_at: float
     last_error: Optional[str] = None
+    error_class: Optional[str] = None
     approval_required: bool
     approved: bool
     events: List[TaskEventResponse]
@@ -49,6 +50,7 @@ def to_response(rec: TaskRecord) -> TaskResponse:
         created_at=rec.created_at,
         updated_at=rec.updated_at,
         last_error=rec.last_error,
+        error_class=rec.error_class,
         approval_required=rec.approval_required,
         approved=rec.approved,
         events=[
