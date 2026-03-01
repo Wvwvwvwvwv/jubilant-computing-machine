@@ -93,4 +93,36 @@ export const sandboxAPI = {
   }
 }
 
+
+export const tasksAPI = {
+  create: async (goal: string, maxAttempts: number = 3, approvalRequired: boolean = false) => {
+    const { data } = await api.post('/tasks', {
+      goal,
+      max_attempts: maxAttempts,
+      approval_required: approvalRequired
+    })
+    return data
+  },
+
+  get: async (taskId: string) => {
+    const { data } = await api.get(`/tasks/${taskId}`)
+    return data
+  },
+
+  list: async (limit: number = 50) => {
+    const { data } = await api.get('/tasks', { params: { limit } })
+    return data
+  },
+
+  run: async (taskId: string) => {
+    const { data } = await api.post(`/tasks/${taskId}/run`)
+    return data
+  },
+
+  approve: async (taskId: string) => {
+    const { data } = await api.post(`/tasks/${taskId}/approve`)
+    return data
+  }
+}
+
 export default api
