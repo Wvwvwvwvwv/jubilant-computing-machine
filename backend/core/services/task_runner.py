@@ -104,6 +104,39 @@ class TaskRunner:
         self._event(rec, "task_approved", "Task approved by user")
         return rec
 
+
+    def run_with_result(self, task_id: str, exit_code: int, stdout: str = "", stderr: str = "") -> TaskRecord:
+        rec = self.tasks[task_id]
+
+        if rec.approval_required and not rec.approved:
+            rec.status = TaskStatus.NEEDS_APPROVAL
+            self._event(rec, "task_blocked", "Approval required before run")
+            return rec
+
+        if rec.status in {TaskStatus.SUCCESS, TaskStatus.FAILED}:
+            self._event(rec, "task_skip", f"Task already terminal: {rec.status.value}")
+            return rec
+
+        rec.status = TaskStatus.RUNNING
+        self._event(rec, "task_started", "Task run started", {"attempt": rec.attempt + 1})
+
+        if exit_code == 0:
+            rec.status = TaskStatus.SUCCESS
+            self._event(rec, "task_success", "Task succeeded", {"stdout": stdout[-1000:]})
+            return rec
+
+        rec.attempt += 1
+        rec.last_error = (stderr or "Execution error")[:1000]
+
+        if rec.attempt >= rec.max_attempts:
+            rec.status = TaskStatus.FAILED
+            self._event(rec, "task_failed", rec.last_error, {"attempt": rec.attempt, "exit_code": exit_code})
+        else:
+            rec.status = TaskStatus.RETRYING
+            self._event(rec, "task_retry", rec.last_error, {"attempt": rec.attempt, "exit_code": exit_code})
+
+        return rec
+
     def run_once(self, task_id: str) -> TaskRecord:
         rec = self.tasks[task_id]
 
