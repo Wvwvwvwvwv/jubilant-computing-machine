@@ -6,10 +6,13 @@ import uvicorn
 from routers import chat, memory, books, sandbox, tasks
 from services.memory_engine import MemoryEngine
 from services.task_runner import TaskRunner
+from services.state_db import StateDB
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    app.state.state_db = StateDB()
+    app.state.state_db.initialize()
     app.state.memory_engine = MemoryEngine()
     app.state.task_runner = TaskRunner()
     app.state.task_runner.load_state()
@@ -59,7 +62,11 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy"}
+    db_health = app.state.state_db.health() if hasattr(app.state, "state_db") else {"ok": False}
+    return {
+        "status": "healthy" if db_health.get("ok") else "degraded",
+        "state_db": db_health,
+    }
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
