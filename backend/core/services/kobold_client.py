@@ -1,5 +1,5 @@
 import httpx
-from typing import List, Dict
+from typing import List, Dict, Any
 
 class KoboldClient:
     """Клиент для KoboldCpp API"""
@@ -101,13 +101,17 @@ class KoboldClient:
 
         return ""
     
-    def _format_messages(self, messages: List[Dict]) -> str:
+    def _format_messages(self, messages: List[Any]) -> str:
         """Форматирование сообщений в промпт"""
         
         formatted = []
         for msg in messages:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
+            if isinstance(msg, dict):
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+            else:
+                role = getattr(msg, "role", "user")
+                content = getattr(msg, "content", "")
             
             if role == "system":
                 formatted.append(f"System: {content}")
