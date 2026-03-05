@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Send, ThumbsUp, ThumbsDown } from 'lucide-react'
 import { chatAPI } from '../api/client'
 
@@ -8,24 +8,93 @@ interface Message {
   id?: string
 }
 
+interface ChatDraftState {
+  messages: Message[]
+  useMemory: boolean
+}
+
+const CHAT_MESSAGES_KEY = 'chat_messages'
+const CHAT_USE_MEMORY_KEY = 'chat_use_memory'
+
+// In-memory fallback: survives route unmount/mount even if storage is unavailable.
+let chatDraftState: ChatDraftState | null = null
+
+function loadMessages(): Message[] {
+  if (chatDraftState) {
+    return chatDraftState.messages
+  }
+
+  try {
+    const saved = localStorage.getItem(CHAT_MESSAGES_KEY)
+    const parsed = saved ? JSON.parse(saved) : []
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function loadUseMemory(): boolean {
+  if (chatDraftState) {
+    return chatDraftState.useMemory
+  }
+
+  try {
+    const saved = localStorage.getItem(CHAT_USE_MEMORY_KEY)
+    return saved ? Boolean(JSON.parse(saved)) : true
+  } catch {
+    return true
+  }
+}
+
+function persistState(messages: Message[], useMemory: boolean) {
+  chatDraftState = { messages, useMemory }
+
+  try {
+    localStorage.setItem(CHAT_MESSAGES_KEY, JSON.stringify(messages))
+    localStorage.setItem(CHAT_USE_MEMORY_KEY, JSON.stringify(useMemory))
+  } catch {
+    // ignore storage errors (quota/private mode)
+  }
+}
+
 export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>([])
+  const [messages, setMessages] = useState<Message[]>(loadMessages)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [useMemory, setUseMemory] = useState(true)
+  const [useMemory, setUseMemory] = useState<boolean>(loadUseMemory)
+
+  const messagesRef = useRef(messages)
+  const useMemoryRef = useRef(useMemory)
+
+  const updateMessages = (next: Message[] | ((prev: Message[]) => Message[])) => {
+    setMessages(prev => {
+      const computed = typeof next === 'function' ? (next as (p: Message[]) => Message[])(prev) : next
+      messagesRef.current = computed
+      persistState(computed, useMemoryRef.current)
+      return computed
+    })
+  }
+
+  const updateUseMemory = (next: boolean) => {
+    useMemoryRef.current = next
+    setUseMemory(next)
+    persistState(messagesRef.current, next)
+  }
 
   const sendMessage = async () => {
     if (!input.trim() || loading) return
 
     const userMessage: Message = { role: 'user', content: input }
-    setMessages(prev => [...prev, userMessage])
+    const nextMessages = [...messagesRef.current, userMessage]
+
+    updateMessages(nextMessages)
     setInput('')
     setLoading(true)
 
     try {
-      const response = await chatAPI.send([...messages, userMessage], useMemory)
-      
-      setMessages(prev => [...prev, {
+      const response = await chatAPI.send(nextMessages, useMemoryRef.current)
+
+      updateMessages(prev => [...prev, {
         role: 'assistant',
         content: response.response,
         id: response.interaction_id
@@ -33,7 +102,7 @@ export default function ChatPage() {
     } catch (error: any) {
       console.error('Chat error:', error)
       const detail = error?.response?.data?.detail
-      setMessages(prev => [...prev, {
+      updateMessages(prev => [...prev, {
         role: 'assistant',
         content: detail ? `❌ ${detail}` : '❌ Ошибка соединения с сервером'
       }])
@@ -77,7 +146,7 @@ export default function ChatPage() {
             }}>
               {msg.content}
             </div>
-            
+
             {msg.role === 'assistant' && msg.id && (
               <div style={{
                 display: 'flex',
@@ -115,7 +184,7 @@ export default function ChatPage() {
             )}
           </div>
         ))}
-        
+
         {loading && (
           <div style={{ alignSelf: 'flex-start' }}>
             <div style={{
@@ -141,11 +210,11 @@ export default function ChatPage() {
           <input
             type="checkbox"
             checked={useMemory}
-            onChange={(e) => setUseMemory(e.target.checked)}
+            onChange={(e) => updateUseMemory(e.target.checked)}
           />
           Память
         </label>
-        
+
         <input
           type="text"
           value={input}
@@ -162,7 +231,7 @@ export default function ChatPage() {
             outline: 'none'
           }}
         />
-        
+
         <button
           onClick={sendMessage}
           disabled={loading || !input.trim()}

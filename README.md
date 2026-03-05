@@ -41,6 +41,13 @@ npm run dev
 
 Открыть http://localhost:5173
 
+
+### 4. Полный smoke-прогон
+```bash
+cd ~/roampal-android
+bash termux/full-smoke.sh
+```
+
 Если видите "Ошибка соединения с сервером", запустите диагностику:
 ```bash
 cd ~/roampal-android
@@ -74,3 +81,4 @@ data/            - Персистентные данные
 - [Установка](docs/installation.md)
 - [Архитектура](docs/architecture.md)
 - [API](docs/api.md)
+- [Handoff v2](docs/handoff-v2.md)
