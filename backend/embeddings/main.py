@@ -2,7 +2,9 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
 import asyncio
+import hashlib
 import os
+import random
 import uvicorn
 
 try:
@@ -22,6 +24,25 @@ model = None
 model_loading = False
 model_error = None
 MODEL_NAME = os.getenv("EMBEDDINGS_MODEL", "all-MiniLM-L6-v2")
+FALLBACK_DIMENSION = int(os.getenv("EMBEDDINGS_FALLBACK_DIM", "384"))
+
+
+def deterministic_fallback_embedding(text: str, dim: int = FALLBACK_DIMENSION) -> List[float]:
+    """Deterministic pseudo-embedding for degraded mode."""
+
+    normalized = (text or "").strip().lower()
+    if not normalized:
+        return [0.0] * dim
+
+    seed = int(hashlib.sha256(normalized.encode("utf-8")).hexdigest(), 16) % (2**32)
+    rng = random.Random(seed)
+    vector = [rng.uniform(-1.0, 1.0) for _ in range(dim)]
+
+    # L2 normalization for more stable cosine-like behavior.
+    norm = sum(v * v for v in vector) ** 0.5
+    if norm == 0:
+        return [0.0] * dim
+    return [v / norm for v in vector]
 
 
 async def _load_model():
@@ -58,35 +79,39 @@ class EmbedResponse(BaseModel):
     embeddings: List[List[float]]
     model: str
     dimension: int
+    fallback_active: bool = False
 
 
 @app.post("/embed", response_model=EmbedResponse)
 async def embed_texts(request: EmbedRequest):
     """Генерация эмбеддингов для текстов"""
 
-    if not model:
-        detail = "Model not loaded"
-        if model_loading:
-            detail = "Model is still loading"
-        elif model_error:
-            detail = f"Model unavailable: {model_error}"
-        raise HTTPException(status_code=503, detail=detail)
+    if model:
+        try:
+            embeddings = model.encode(
+                request.texts,
+                convert_to_numpy=True,
+                show_progress_bar=False,
+            )
 
-    try:
-        embeddings = model.encode(
-            request.texts,
-            convert_to_numpy=True,
-            show_progress_bar=False,
-        )
+            return EmbedResponse(
+                embeddings=embeddings.tolist(),
+                model=MODEL_NAME,
+                dimension=embeddings.shape[1],
+                fallback_active=False,
+            )
 
-        return EmbedResponse(
-            embeddings=embeddings.tolist(),
-            model=MODEL_NAME,
-            dimension=embeddings.shape[1],
-        )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    # Degraded mode: deterministic fallback keeps API available for memory flows.
+    fallback_vectors = [deterministic_fallback_embedding(text) for text in request.texts]
+    return EmbedResponse(
+        embeddings=fallback_vectors,
+        model=f"{MODEL_NAME}::fallback",
+        dimension=FALLBACK_DIMENSION,
+        fallback_active=True,
+    )
 
 
 @app.get("/")
@@ -100,6 +125,7 @@ async def root():
 
 @app.get("/health")
 async def health():
+    fallback_active = model is None
     return {
         "status": "healthy",
         "model_loaded": model is not None,
@@ -107,6 +133,8 @@ async def health():
         "error": model_error,
         "loading": model_loading,
         "sentence_transformers_available": SentenceTransformer is not None,
+        "fallback_active": fallback_active,
+        "fallback_dimension": FALLBACK_DIMENSION if fallback_active else None,
     }
 
 

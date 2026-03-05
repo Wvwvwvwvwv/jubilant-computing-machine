@@ -1,18 +1,22 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
 
-from routers import chat, memory, books, sandbox
+from routers import chat, memory, books, sandbox, tasks
 from services.memory_engine import MemoryEngine
+from services.task_runner import TaskRunner
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     app.state.memory_engine = MemoryEngine()
+    app.state.task_runner = TaskRunner()
+    app.state.task_runner.load_state()
     await app.state.memory_engine.initialize()
     yield
     # Shutdown
+    app.state.task_runner.save_state()
     await app.state.memory_engine.close()
 
 app = FastAPI(
@@ -36,6 +40,7 @@ app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(memory.router, prefix="/api/memory", tags=["memory"])
 app.include_router(books.router, prefix="/api/books", tags=["books"])
 app.include_router(sandbox.router, prefix="/api/sandbox", tags=["sandbox"])
+app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
 
 @app.get("/")
 async def root():
@@ -47,6 +52,7 @@ async def root():
             "memory": "/api/memory",
             "books": "/api/books",
             "sandbox": "/api/sandbox",
+            "tasks": "/api/tasks",
             "docs": "/docs"
         }
     }
