@@ -4,7 +4,7 @@
 set -e
 
 PIP_BIN="python -m pip"
-PIP_FLAGS="--prefer-binary"
+PIP_FLAGS="--prefer-binary --only-binary=:all:"
 
 echo "🚀 Roampal Android Setup"
 echo "========================"
@@ -102,10 +102,17 @@ pydantic==1.10.21
 EOF
 fi
 
-# Самовосстановление старых шаблонов: numpy ставим только через pkg (python-numpy),
-# т.к. pip на Python 3.13 в Termux часто уходит в source build и падает.
-sed -i '/^numpy==/d' "$HOME/roampal-android/backend/core/requirements-termux.txt" 2>/dev/null || true
-sed -i '/^numpy==/d' "$HOME/roampal-android/backend/embeddings/requirements-lite-termux.txt" 2>/dev/null || true
+# Самовосстановление старых шаблонов для Termux:
+# тяжелые/компилируемые зависимости исключаем из pip-профиля и оставляем только pkg-версии.
+for req in \
+  "$HOME/roampal-android/backend/core/requirements-termux.txt" \
+  "$HOME/roampal-android/backend/embeddings/requirements-lite-termux.txt"
+do
+  sed -i '/^numpy==/d' "$req" 2>/dev/null || true
+  sed -i '/^torch==/d' "$req" 2>/dev/null || true
+  sed -i '/^sentence-transformers==/d' "$req" 2>/dev/null || true
+  sed -i '/^chromadb==/d' "$req" 2>/dev/null || true
+done
 
 # Установка KoboldCpp
 echo "🤖 Установка KoboldCpp..."
@@ -165,11 +172,16 @@ print(f"{sys.version_info.major}.{sys.version_info.minor}")
 PYV
 )
 
-if [ "$PY_VER" = "3.13" ]; then
-    echo "ℹ️ Python $PY_VER detected: skipping heavy embeddings deps, using lite Termux profile."
-    $PIP_BIN install $PIP_FLAGS -c "$CONSTRAINTS" -r requirements-lite-termux.txt
-elif ! $PIP_BIN install $PIP_FLAGS -c "$CONSTRAINTS" -r requirements.txt; then
-    echo "⚠️ Full embeddings deps failed, installing lite Termux profile..."
+# Termux default: lite embeddings profile to avoid source builds (numpy/ninja/torch chain).
+# Full profile only by explicit opt-in: FORCE_FULL_EMBEDDINGS=1 bash termux/setup.sh
+if [ "${FORCE_FULL_EMBEDDINGS:-0}" = "1" ] && [ "$PY_VER" != "3.13" ]; then
+    echo "ℹ️ FORCE_FULL_EMBEDDINGS=1: trying full embeddings requirements."
+    if ! $PIP_BIN install $PIP_FLAGS -c "$CONSTRAINTS" -r requirements.txt; then
+        echo "⚠️ Full embeddings deps failed, falling back to lite Termux profile..."
+        $PIP_BIN install $PIP_FLAGS -c "$CONSTRAINTS" -r requirements-lite-termux.txt
+    fi
+else
+    echo "ℹ️ Using lite embeddings profile on Termux (stable default, Python=$PY_VER)."
     $PIP_BIN install $PIP_FLAGS -c "$CONSTRAINTS" -r requirements-lite-termux.txt
 fi
 

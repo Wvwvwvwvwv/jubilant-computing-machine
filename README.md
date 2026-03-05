@@ -65,6 +65,12 @@ cd ~/roampal-android
 bash termux/deploy.sh work
 ```
 
+Быстрый откат на последний успешный deploy-checkpoint:
+```bash
+cd ~/roampal-android
+bash termux/rollback-last-good.sh
+```
+
 ## Возможности
 
 - ✅ Чат с локальным LLM

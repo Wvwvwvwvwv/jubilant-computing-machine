@@ -7,6 +7,7 @@ REPO_URL="https://github.com/Wvwvwvwvwv/jubilant-computing-machine.git"
 TARGET_DIR="$HOME/roampal-android"
 BRANCH="${1:-work}"
 RUN_SMOKE="${RUN_SMOKE:-1}"
+CHECKPOINT_FILE="$TARGET_DIR/.last_known_good_sha"
 
 log() {
   printf '\n[%s] %s\n' "$(date +%H:%M:%S)" "$*"
@@ -46,6 +47,10 @@ if [ "$RUN_SMOKE" = "1" ] && [ -f "termux/full-smoke.sh" ]; then
 else
   log "Smoke checks skipped (RUN_SMOKE=$RUN_SMOKE)."
 fi
+
+GOOD_SHA=$(git rev-parse HEAD)
+echo "$GOOD_SHA" > "$CHECKPOINT_FILE"
+log "Checkpoint updated: $CHECKPOINT_FILE -> $GOOD_SHA"
 
 log "Deploy completed successfully"
 log "Core: http://127.0.0.1:8000 | Frontend: http://127.0.0.1:5173"
