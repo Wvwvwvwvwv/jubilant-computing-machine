@@ -56,7 +56,7 @@ bash termux/diagnose.sh
 
 ### 5. Автоматическое развертывание (рекомендуется)
 ```bash
-curl -sSL https://raw.githubusercontent.com/Wvwvwvwvwv/jubilant-computing-machine/main/termux/deploy.sh | bash -s -- work
+curl -sSL https://raw.githubusercontent.com/Wvwvwvwvwv/jubilant-computing-machine/work/termux/deploy.sh | bash -s -- work
 ```
 
 Локальный запуск (если репозиторий уже есть):
@@ -69,6 +69,12 @@ bash termux/deploy.sh work
 ```bash
 cd ~/roampal-android
 bash termux/rollback-last-good.sh
+```
+
+Принудительный откат на жёстко зафиксированную безопасную точку:
+```bash
+cd ~/roampal-android
+bash termux/rollback-last-good.sh pinned
 ```
 
 ## Возможности

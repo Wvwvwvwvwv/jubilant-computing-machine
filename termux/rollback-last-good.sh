@@ -5,19 +5,35 @@ set -euo pipefail
 
 TARGET_DIR="$HOME/roampal-android"
 CHECKPOINT_FILE="$TARGET_DIR/.last_known_good_sha"
+PINNED_TAG_FILE="$TARGET_DIR/termux/pinned-safe-tag"
+
+MODE="${1:-auto}"
 
 if [ ! -d "$TARGET_DIR/.git" ]; then
   echo "❌ Repo not found: $TARGET_DIR"
   exit 1
 fi
 
-if [ ! -f "$CHECKPOINT_FILE" ]; then
-  echo "❌ Checkpoint file not found: $CHECKPOINT_FILE"
-  echo "Подсказка: сначала выполните успешный deploy (termux/deploy.sh work)."
-  exit 1
+if [ "$MODE" = "pinned" ]; then
+  if [ ! -f "$PINNED_TAG_FILE" ]; then
+    echo "❌ Pinned tag file not found: $PINNED_TAG_FILE"
+    exit 1
+  fi
+  PINNED_TAG=$(cat "$PINNED_TAG_FILE")
+  SHA="$PINNED_TAG"
+elif [ -f "$CHECKPOINT_FILE" ]; then
+  SHA=$(cat "$CHECKPOINT_FILE")
+else
+  if [ ! -f "$PINNED_TAG_FILE" ]; then
+    echo "❌ Checkpoint file not found: $CHECKPOINT_FILE"
+    echo "❌ Pinned tag file not found: $PINNED_TAG_FILE"
+    echo "Подсказка: сначала выполните успешный deploy (termux/deploy.sh work)."
+    exit 1
+  fi
+  PINNED_TAG=$(cat "$PINNED_TAG_FILE")
+  SHA="$PINNED_TAG"
+  echo "ℹ️ Checkpoint not found, using pinned tag: $PINNED_TAG"
 fi
-
-SHA=$(cat "$CHECKPOINT_FILE")
 
 cd "$TARGET_DIR"
 echo "🛑 Stopping services..."

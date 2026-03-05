@@ -35,7 +35,7 @@ pkg install -y \
 if [ ! -d "$HOME/roampal-android" ]; then
     echo "📥 Клонирование репозитория..."
     cd "$HOME"
-    git clone https://github.com/Wvwvwvwvwv/jubilant-computing-machine.git roampal-android
+    git clone -b work --single-branch https://github.com/Wvwvwvwvwv/jubilant-computing-machine.git roampal-android
 fi
 
 cd "$HOME/roampal-android"
