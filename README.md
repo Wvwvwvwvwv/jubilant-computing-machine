@@ -54,6 +54,17 @@ cd ~/roampal-android
 bash termux/diagnose.sh
 ```
 
+### 5. Автоматическое развертывание (рекомендуется)
+```bash
+curl -sSL https://raw.githubusercontent.com/Wvwvwvwvwv/jubilant-computing-machine/main/termux/deploy.sh | bash -s -- work
+```
+
+Локальный запуск (если репозиторий уже есть):
+```bash
+cd ~/roampal-android
+bash termux/deploy.sh work
+```
+
 ## Возможности
 
 - ✅ Чат с локальным LLM
