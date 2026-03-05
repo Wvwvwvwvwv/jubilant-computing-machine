@@ -42,6 +42,29 @@ class TaskListResponse(BaseModel):
     count: int
 
 
+class QueueEnqueueRequest(BaseModel):
+    type: str = Field(..., min_length=2, max_length=120)
+    payload: dict = Field(default_factory=dict)
+    idempotency_key: str = Field(..., min_length=4, max_length=200)
+    user_id: str = Field("local-user", min_length=3, max_length=120)
+    max_attempts: int = Field(5, ge=1, le=20)
+
+
+class QueueJobResponse(BaseModel):
+    id: str
+    user_id: str
+    type: str
+    status: str
+    idempotency_key: str
+    created_at: int
+    deduplicated: bool = False
+
+
+class QueueListResponse(BaseModel):
+    items: List[dict]
+    count: int
+
+
 def to_response(rec: TaskRecord) -> TaskResponse:
     return TaskResponse(
         task_id=rec.task_id,
@@ -134,3 +157,27 @@ async def list_tasks(req: Request, limit: int = 50):
     runner: TaskRunner = req.app.state.task_runner
     items = [to_response(x) for x in runner.list_tasks(limit=limit)]
     return TaskListResponse(items=items, count=len(items))
+
+
+@router.post("/queue/enqueue", response_model=QueueJobResponse)
+async def queue_enqueue(body: QueueEnqueueRequest, req: Request):
+    if not hasattr(req.app.state, "state_db"):
+        raise HTTPException(status_code=503, detail="state_db is not initialized")
+
+    job = req.app.state.state_db.enqueue_job(
+        job_type=body.type,
+        payload=body.payload,
+        idempotency_key=body.idempotency_key,
+        user_id=body.user_id,
+        max_attempts=body.max_attempts,
+    )
+    return QueueJobResponse(**job)
+
+
+@router.get("/queue/list", response_model=QueueListResponse)
+async def queue_list(req: Request, user_id: str = "local-user", limit: int = 50):
+    if not hasattr(req.app.state, "state_db"):
+        raise HTTPException(status_code=503, detail="state_db is not initialized")
+
+    items = req.app.state.state_db.list_jobs(user_id=user_id, limit=limit)
+    return QueueListResponse(items=items, count=len(items))

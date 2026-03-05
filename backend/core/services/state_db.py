@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 import sqlite3
-from typing import Optional
+from typing import Optional, List, Dict, Any
+import json
+import time
+import uuid
 
 
 class StateDB:
@@ -87,6 +90,16 @@ class StateDB:
                     ON jobs(status, next_run_at);
                 """
             )
+
+            # Single-user bootstrap for Phase 1.
+            conn.execute(
+                "INSERT OR IGNORE INTO users(id, settings_json) VALUES (?, ?)",
+                ("local-user", "{}"),
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO runtime_settings(user_id) VALUES (?)",
+                ("local-user",),
+            )
             conn.commit()
         finally:
             conn.close()
@@ -101,3 +114,99 @@ class StateDB:
             return {"ok": True, "path": str(self.db_path)}
         except Exception as e:
             return {"ok": False, "path": str(self.db_path), "error": str(e)}
+
+    def enqueue_job(
+        self,
+        *,
+        job_type: str,
+        payload: Dict[str, Any],
+        idempotency_key: str,
+        user_id: str = "local-user",
+        max_attempts: int = 5,
+    ) -> Dict[str, Any]:
+        job_id = str(uuid.uuid4())
+        now = int(time.time())
+
+        conn = sqlite3.connect(str(self.db_path))
+        try:
+            conn.execute("PRAGMA foreign_keys=ON;")
+            conn.execute(
+                """
+                INSERT INTO jobs (
+                    id, user_id, type, payload_json, idempotency_key,
+                    status, attempts, max_attempts, next_run_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)
+                """,
+                (
+                    job_id,
+                    user_id,
+                    job_type,
+                    json.dumps(payload, ensure_ascii=False),
+                    idempotency_key,
+                    max_attempts,
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+            return {
+                "id": job_id,
+                "user_id": user_id,
+                "type": job_type,
+                "status": "pending",
+                "idempotency_key": idempotency_key,
+                "created_at": now,
+            }
+        except sqlite3.IntegrityError:
+            row = conn.execute(
+                """
+                SELECT id, user_id, type, status, idempotency_key, created_at
+                FROM jobs
+                WHERE user_id=? AND idempotency_key=?
+                """,
+                (user_id, idempotency_key),
+            ).fetchone()
+            if row:
+                return {
+                    "id": row[0],
+                    "user_id": row[1],
+                    "type": row[2],
+                    "status": row[3],
+                    "idempotency_key": row[4],
+                    "created_at": row[5],
+                    "deduplicated": True,
+                }
+            raise
+        finally:
+            conn.close()
+
+    def list_jobs(self, *, user_id: str = "local-user", limit: int = 50) -> List[Dict[str, Any]]:
+        safe_limit = max(1, min(limit, 200))
+        conn = sqlite3.connect(str(self.db_path))
+        try:
+            rows = conn.execute(
+                """
+                SELECT id, user_id, type, status, attempts, max_attempts, next_run_at, created_at, idempotency_key
+                FROM jobs
+                WHERE user_id=?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (user_id, safe_limit),
+            ).fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "user_id": row[1],
+                    "type": row[2],
+                    "status": row[3],
+                    "attempts": row[4],
+                    "max_attempts": row[5],
+                    "next_run_at": row[6],
+                    "created_at": row[7],
+                    "idempotency_key": row[8],
+                }
+                for row in rows
+            ]
+        finally:
+            conn.close()
