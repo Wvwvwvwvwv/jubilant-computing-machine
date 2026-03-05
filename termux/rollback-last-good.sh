@@ -9,6 +9,31 @@ PINNED_TAG_FILE="$TARGET_DIR/termux/pinned-safe-tag"
 
 MODE="${1:-auto}"
 
+print_help() {
+  cat <<'EOF'
+Usage:
+  bash termux/rollback-last-good.sh [auto|pinned]
+
+Modes:
+  auto    Use .last_known_good_sha if present, otherwise fallback to pinned tag.
+  pinned  Force rollback to pinned tag from termux/pinned-safe-tag.
+EOF
+}
+
+case "$MODE" in
+  -h|--help|help)
+    print_help
+    exit 0
+    ;;
+  auto|pinned)
+    ;;
+  *)
+    echo "❌ Unknown mode: $MODE"
+    print_help
+    exit 2
+    ;;
+esac
+
 if [ ! -d "$TARGET_DIR/.git" ]; then
   echo "❌ Repo not found: $TARGET_DIR"
   exit 1
