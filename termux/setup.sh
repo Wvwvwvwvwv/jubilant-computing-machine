@@ -43,6 +43,25 @@ cd "$HOME/roampal-android"
 # Гарантируем права на запуск termux-скриптов
 chmod +x "$HOME/roampal-android"/termux/*.sh 2>/dev/null || true
 
+# Самовосстановление deploy.sh для старых/неполных клонов.
+# Частый кейс: локальный репозиторий был создан до добавления termux/deploy.sh.
+if [ ! -f "$HOME/roampal-android/termux/deploy.sh" ]; then
+    echo "ℹ️ termux/deploy.sh не найден, восстанавливаю из GitHub..."
+    BRANCH=$(git -C "$HOME/roampal-android" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "work")
+    RAW_URL="https://raw.githubusercontent.com/Wvwvwvwvwv/jubilant-computing-machine/${BRANCH}/termux/deploy.sh"
+
+    if curl -fsSL "$RAW_URL" -o "$HOME/roampal-android/termux/deploy.sh"; then
+        chmod +x "$HOME/roampal-android/termux/deploy.sh"
+        echo "✅ termux/deploy.sh восстановлен (${BRANCH})"
+    else
+        echo "⚠️ Не удалось загрузить deploy.sh из ${BRANCH}, пробую ветку work..."
+        curl -fsSL "https://raw.githubusercontent.com/Wvwvwvwvwv/jubilant-computing-machine/work/termux/deploy.sh" \
+          -o "$HOME/roampal-android/termux/deploy.sh"
+        chmod +x "$HOME/roampal-android/termux/deploy.sh"
+        echo "✅ termux/deploy.sh восстановлен (work)"
+    fi
+fi
+
 # Самовосстановление Termux-файлов, если репозиторий локально старый/неполный
 mkdir -p \
     "$HOME/roampal-android/termux" \
