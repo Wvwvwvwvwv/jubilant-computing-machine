@@ -29,7 +29,13 @@ class ChatResponse(BaseModel):
 
 def serialize_messages(messages: List[ChatMessage]) -> List[dict]:
     """Pydantic model -> plain dict для совместимости с KoboldClient."""
-    return [m.model_dump() for m in messages]
+    serialized = []
+    for m in messages:
+        if hasattr(m, "model_dump"):
+            serialized.append(m.model_dump())  # pydantic v2
+        else:
+            serialized.append(m.dict())  # pydantic v1 (Termux профиль)
+    return serialized
 
 
 @router.post("/", response_model=ChatResponse)
