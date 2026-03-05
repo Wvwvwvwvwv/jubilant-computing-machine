@@ -64,7 +64,6 @@ pydantic==1.10.21
 httpx==0.26.0
 python-multipart==0.0.6
 aiofiles==23.2.1
-numpy==1.26.3
 EOF
 fi
 
@@ -81,9 +80,13 @@ if [ ! -f "$HOME/roampal-android/backend/embeddings/requirements-lite-termux.txt
 fastapi==0.109.0
 uvicorn==0.27.0
 pydantic==1.10.21
-numpy==1.26.3
 EOF
 fi
+
+# Самовосстановление старых шаблонов: numpy ставим только через pkg (python-numpy),
+# т.к. pip на Python 3.13 в Termux часто уходит в source build и падает.
+sed -i '/^numpy==/d' "$HOME/roampal-android/backend/core/requirements-termux.txt" 2>/dev/null || true
+sed -i '/^numpy==/d' "$HOME/roampal-android/backend/embeddings/requirements-lite-termux.txt" 2>/dev/null || true
 
 # Установка KoboldCpp
 echo "🤖 Установка KoboldCpp..."
@@ -137,7 +140,16 @@ cd "$HOME/roampal-android/backend/sandbox"
 $PIP_BIN install $PIP_FLAGS -c "$CONSTRAINTS" -r requirements-termux.txt
 
 cd "$HOME/roampal-android/backend/embeddings"
-if ! $PIP_BIN install $PIP_FLAGS -c "$CONSTRAINTS" -r requirements.txt; then
+PY_VER=$(python - <<'PYV'
+import sys
+print(f"{sys.version_info.major}.{sys.version_info.minor}")
+PYV
+)
+
+if [ "$PY_VER" = "3.13" ]; then
+    echo "ℹ️ Python $PY_VER detected: skipping heavy embeddings deps, using lite Termux profile."
+    $PIP_BIN install $PIP_FLAGS -c "$CONSTRAINTS" -r requirements-lite-termux.txt
+elif ! $PIP_BIN install $PIP_FLAGS -c "$CONSTRAINTS" -r requirements.txt; then
     echo "⚠️ Full embeddings deps failed, installing lite Termux profile..."
     $PIP_BIN install $PIP_FLAGS -c "$CONSTRAINTS" -r requirements-lite-termux.txt
 fi
