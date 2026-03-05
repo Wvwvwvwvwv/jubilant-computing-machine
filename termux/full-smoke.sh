@@ -24,10 +24,36 @@ curl -fsS "$KOBOLD_URL/api/v1/model" >/dev/null
 curl -fsS "$FRONT_URL" >/dev/null
 
 echo "[3/6] Chat smoke"
-CHAT_RESP=$(curl -fsS -X POST "$CORE_URL/api/chat/" \
-  -H 'Content-Type: application/json' \
-  -d '{"messages":[{"role":"user","content":"Ответь одним словом: ok"}],"use_memory":false,"max_tokens":32,"temperature":0.1}')
-printf '%s' "$CHAT_RESP" | python -c 'import json,sys; data=json.load(sys.stdin); assert "response" in data, data'
+CHAT_PAYLOAD='{"messages":[{"role":"user","content":"Ответь одним словом: ok"}],"use_memory":false,"max_tokens":32,"temperature":0.1}'
+CHAT_OK=0
+CHAT_ERR=""
+
+for attempt in 1 2 3 4 5; do
+  CHAT_RESP=$(curl -sS -X POST "$CORE_URL/api/chat/" \
+    -H 'Content-Type: application/json' \
+    -d "$CHAT_PAYLOAD" || true)
+
+  if printf '%s' "$CHAT_RESP" | python -c 'import json,sys; data=json.load(sys.stdin); assert "response" in data, data' >/dev/null 2>&1; then
+    CHAT_OK=1
+    break
+  fi
+
+  CHAT_ERR="$CHAT_RESP"
+  echo "  chat not ready (attempt $attempt/5), retry in 3s..."
+  sleep 3
+done
+
+if [ "$CHAT_OK" -ne 1 ]; then
+  echo "❌ Chat smoke failed after retries"
+  echo "Last chat response: $CHAT_ERR"
+  echo "Core health:"
+  curl -sS -m 5 "$CORE_URL/health" || true
+  echo
+  echo "Kobold model info:"
+  curl -sS -m 8 "$KOBOLD_URL/api/v1/model" || true
+  echo
+  exit 1
+fi
 
 echo "[4/6] Memory smoke"
 MEM_ADD=$(curl -fsS -X POST "$CORE_URL/api/memory/add" \
