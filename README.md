@@ -101,6 +101,7 @@ data/            - Персистентные данные
 - [API](docs/api.md)
 - [Handoff v2](docs/handoff-v2.md)
 - [Companion Vision (STABLE/WILD, personality, voice)](docs/companion-vision.md)
+- [Companion Implementation Plan (API + DB + Voice Go/No-Go)](docs/companion-implementation-plan.md)
 
 ## Backend dependency management
 
