@@ -31,11 +31,23 @@ pkg install -y \
     make \
     cmake
 
+# OCR/runtime deps for PDF fallback (best-effort on constrained mirrors/devices)
+echo "🔎 Установка OCR/graphics зависимостей (tesseract/poppler/pillow build deps)..."
+if ! pkg install -y tesseract poppler libjpeg-turbo libpng zlib build-essential; then
+    echo "⚠️ Не все OCR/graphics пакеты установились через pkg; продолжаю best-effort режимом."
+fi
+
 # Клонирование репозитория (если еще не склонирован)
 if [ ! -d "$HOME/roampal-android" ]; then
     echo "📥 Клонирование репозитория..."
     cd "$HOME"
     git clone https://github.com/Wvwvwvwvwv/jubilant-computing-machine.git roampal-android
+fi
+
+# Try to ensure Python OCR extras even when Poetry path succeeds.
+echo "🐍 OCR python extras (best-effort): pytesseract + pillow"
+if ! $PIP_BIN install $PIP_FLAGS pytesseract==0.3.10 pillow==10.4.0; then
+    echo "⚠️ OCR python extras install failed; CLI OCR path (tesseract/pdftoppm) will be used if available."
 fi
 
 cd "$HOME/roampal-android"

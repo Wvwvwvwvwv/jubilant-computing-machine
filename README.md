@@ -119,3 +119,5 @@ Setup also exports `ANDROID_API_LEVEL` automatically (from system SDK level) to 
 compatibility with Android-native `maturin`/rust builds when they are encountered.
 OCR Python extras (`pytesseract`/`pillow`) are installed in best-effort mode in Termux fallback;
 if they fail to build, API still keeps CLI OCR fallback (`tesseract`/`pdftoppm`) when available.
+Setup now also tries to install OCR system deps via `pkg` (`tesseract`, `poppler`, `libjpeg-turbo`,
+`libpng`, `zlib`, `build-essential`) and retries Python OCR extras in best-effort mode.
