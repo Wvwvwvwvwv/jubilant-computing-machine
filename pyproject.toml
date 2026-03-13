@@ -1,0 +1,45 @@
+[tool.poetry]
+name = "roampal-backend"
+version = "1.0.0"
+description = "Roampal backend services"
+authors = ["Roampal Team"]
+packages = [{ include = "backend" }]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+fastapi = "0.109.0"
+uvicorn = { version = "0.27.0", extras = ["standard"] }
+pydantic = "2.5.3"
+httpx = "0.26.0"
+python-multipart = "0.0.6"
+aiofiles = "23.2.1"
+numpy = "1.26.3"
+pypdf = "4.2.0"
+pytesseract = "0.3.10"
+pillow = "10.4.0"
+
+[tool.poetry.group.memory.dependencies]
+sentence-transformers = "2.3.1"
+chromadb = "0.4.22"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "8.3.2"
+mypy = "1.11.2"
+
+[build-system]
+requires = ["poetry-core>=1.8.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_return_any = false
+warn_unused_configs = true
+check_untyped_defs = false
+pretty = true
+
+[tool.ruff]
+line-length = 100
+
+[tool.black]
+line-length = 100

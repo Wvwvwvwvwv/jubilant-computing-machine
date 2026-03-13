@@ -1,0 +1,40 @@
+name: backend-tests
+
+on:
+  push:
+    branches: [ main, work ]
+  pull_request:
+    branches: [ main, work ]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Poetry and dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install poetry==1.8.3
+          poetry config virtualenvs.create false
+          poetry install --only main,dev --no-interaction --no-ansi
+
+      - name: Compile checks
+        run: |
+          python -m py_compile \
+            backend/core/main.py \
+            backend/core/routers/tasks.py \
+            backend/core/services/task_runner.py \
+            backend/core/services/task_planner.py
+
+      - name: Run backend tests
+        working-directory: backend/core
+        run: pytest -q
+
+      - name: Run mypy sanity checks
+        run: |
+          mypy --explicit-package-bases backend/core/services/task_runner.py backend/core/services/task_planner.py backend/core/routers/tasks.py

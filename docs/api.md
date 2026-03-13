@@ -128,7 +128,7 @@ Base URL: `http://localhost:8000`
 Загрузить книгу или текстовый файл.
 
 **Request:** `multipart/form-data`
-- `file` - .txt или .md файл
+- `file` - .txt, .md или .pdf файл (для PDF: text-layer extraction через `pypdf`, fallback OCR через `pytesseract`)
 
 **Response:**
 ```json
@@ -183,6 +183,132 @@ Base URL: `http://localhost:8000`
   "content": "Содержимое книги..."
 }
 ```
+
+
+### Tasks Endpoints (MVP baseline v1)
+
+> Execution-контракт: endpoint `POST /api/tasks/{task_id}/run` использует LLM planner (KoboldCpp) с детерминированным fallback.
+> Если LLM недоступен/даёт невалидный JSON, используется безопасный эвристический fallback с поддержкой префиксов.
+
+#### POST /api/tasks/
+
+Создать задачу.
+
+**Request:**
+```json
+{
+  "goal": "echo tasks_ok",
+  "max_attempts": 3,
+  "approval_required": false
+}
+```
+
+**Response (пример):**
+```json
+{
+  "task_id": "0f1c...",
+  "goal": "echo tasks_ok",
+  "status": "PENDING",
+  "attempt": 0,
+  "max_attempts": 3,
+  "approval_required": false,
+  "approved": true,
+  "events": [
+    {
+      "kind": "task_created",
+      "message": "Task created",
+      "payload": {
+        "goal": "echo tasks_ok",
+        "max_attempts": 3,
+        "approval_required": false,
+        "policy_requires_approval": false
+      }
+    }
+  ]
+}
+```
+
+#### GET /api/tasks/
+
+Список задач. Query параметр: `limit` (по умолчанию 50).
+
+#### GET /api/tasks/{task_id}
+
+Получить карточку задачи по id.
+
+#### POST /api/tasks/{task_id}/approve
+
+Подтвердить задачу, если она находится в состоянии `NEEDS_APPROVAL`.
+
+#### POST /api/tasks/{task_id}/run
+
+Запустить выполнение задачи.
+
+- Planner запрашивает у LLM JSON вида `{tool, language, code, timeout}` и исполняет `tool=sandbox.execute`.
+- При ошибке LLM используется fallback: префиксы (`python:`, `js:`, ...) + intent-маркеры.
+- При `HTTPException(408)` из sandbox задача получает транзиентный результат (`exit_code=124`).
+- Событие `task_started` содержит `payload` с полями `tool` и `language`.
+
+**Planner routing examples:**
+```text
+goal: "echo ok"                  -> language=bash
+goal: "python: print(2+2)"       -> language=python
+goal: "js: console.log(42)"      -> language=javascript
+goal: "print(2+2)"               -> heuristic language=python
+```
+
+### Tasks Statuses
+
+- `PENDING`
+- `RUNNING`
+- `RETRYING`
+- `SUCCESS`
+- `FAILED`
+- `NEEDS_APPROVAL`
+
+### Tasks Security/Approval Policy (v1)
+
+- Используется policy version: `task-approval-policy-v1`.
+- Risk levels: `low`, `medium`, `high`.
+- `high` риск (например destructive patterns) требует обязательного approve и переводит задачу в `NEEDS_APPROVAL`.
+- События `task_created`, `task_needs_approval`, `task_blocked`, `task_approved` содержат policy/audit поля (`policy_version`, `risk_level`, `approval_reason`, `approver`, `approved_at`).
+- Для approve-гейта используется `approval_fingerprint`; если задача/политика дрейфует после approve, событие `task_approval_invalidated` сбрасывает approve и снова требует подтверждение.
+
+### Tasks Retry Policy (v1)
+
+- `transient` ошибки: переход в `RETRYING` (если `attempt < max_attempts`) и событие `task_retry`.
+- `command`, `permission`, `runtime`: fail-fast (событие `task_failed` без промежуточного `RETRYING`).
+- События `task_retry` и `task_failed` включают поля `retry_allowed` и `retry_delay_seconds`.
+
+### Tasks Event Ordering Contract (v1)
+
+Ниже зафиксирован ожидаемый порядок событий для ключевых веток исполнения.
+
+1. **Success flow**
+   - `task_created` → `task_started` → `task_success`
+
+2. **Retry/failed flow**
+   - `task_created` → `task_started` → `task_retry` (повторяется) → `task_failed`
+
+3. **Approval-gated flow**
+   - `task_created` → `task_needs_approval` → `task_blocked` → `task_approved` → `task_started` → (`task_success` | `task_retry` | `task_failed`)
+   - при дрейфе policy/goal: `... -> task_approval_invalidated -> task_needs_approval/task_blocked`
+
+4. **Terminal re-run / idempotent skip**
+   - После терминального статуса (`SUCCESS` или `FAILED`) повторный `run` не выполняет команду заново и пишет событие `task_skip`.
+
+### Tasks Event Types (v1)
+
+- `task_created`
+- `task_needs_approval`
+- `task_blocked`
+- `task_approved`
+- `task_started`
+- `task_retry`
+- `task_failed`
+- `task_success`
+- `task_skip`
+- `task_approval_invalidated`
 
 ### Sandbox Endpoints
 

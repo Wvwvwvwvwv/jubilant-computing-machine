@@ -8,6 +8,12 @@ PROJECT_ROOT="$HOME/roampal-android"
 echo "🚀 Запуск Roampal Android Services"
 echo "==================================="
 
+# Сначала мягко останавливаем возможные старые процессы,
+# чтобы избежать дубликатов (особенно kobold/core после падений deploy/smoke).
+if [ -f "$PROJECT_ROOT/termux/stop-services.sh" ]; then
+    bash "$PROJECT_ROOT/termux/stop-services.sh" >/dev/null 2>&1 || true
+fi
+
 # Проверка установки
 if [ ! -d "$PROJECT_ROOT" ]; then
     echo "❌ Проект не найден. Запустите setup.sh"
@@ -62,7 +68,7 @@ start_service "embeddings" "cd $PROJECT_ROOT/backend/embeddings && python main.p
 sleep 5
 
 # 3. Запуск Core API
-start_service "core" "cd $PROJECT_ROOT/backend/core && python main.py"
+start_service "core" "cd $PROJECT_ROOT && python -m backend.core.main"
 sleep 5
 
 # 4. Запуск Frontend

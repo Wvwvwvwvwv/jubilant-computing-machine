@@ -45,14 +45,20 @@ curl -fsS -X POST "$CORE_URL/api/sandbox/execute" \
   -d '{"code":"echo sandbox_ok","language":"bash","timeout":10}' \
   | python -c 'import json,sys; data=json.load(sys.stdin); assert data.get("exit_code")==0, data'
 
-echo "[6/6] Tasks smoke"
-SAFE_CREATE=$(curl -fsS -X POST "$CORE_URL/api/tasks/" \
+echo "[6/6] Tasks smoke (planner + policy + terminal)"
+# Planner routing: python prefix should be reflected in task_started payload.
+PLANNER_CREATE=$(curl -fsS -X POST "$CORE_URL/api/tasks/" \
   -H 'Content-Type: application/json' \
-  -d '{"goal":"echo tasks_ok","max_attempts":2,"approval_required":false}')
-SAFE_ID=$(printf '%s' "$SAFE_CREATE" | python -c 'import json,sys; print(json.load(sys.stdin)["task_id"])')
-SAFE_RUN=$(curl -fsS -X POST "$CORE_URL/api/tasks/$SAFE_ID/run")
-printf '%s' "$SAFE_RUN" | python -c 'import json,sys; data=json.load(sys.stdin); assert data.get("status") in {"SUCCESS","RETRYING","FAILED","NEEDS_APPROVAL"}, data'
+  -d '{"goal":"python: print(2+2)","max_attempts":2,"approval_required":false}')
+PLANNER_ID=$(printf '%s' "$PLANNER_CREATE" | python -c 'import json,sys; print(json.load(sys.stdin)["task_id"])')
+PLANNER_RUN=$(curl -fsS -X POST "$CORE_URL/api/tasks/$PLANNER_ID/run")
+printf '%s' "$PLANNER_RUN" | python -c 'import json,sys; data=json.load(sys.stdin); started=[e for e in data.get("events",[]) if e.get("kind")=="task_started"]; assert started, data; payload=started[-1].get("payload",{}); assert payload.get("language")=="python", payload; assert payload.get("tool")=="sandbox.execute", payload'
 
+# Terminal rerun should emit task_skip.
+PLANNER_RERUN=$(curl -fsS -X POST "$CORE_URL/api/tasks/$PLANNER_ID/run")
+printf '%s' "$PLANNER_RERUN" | python -c 'import json,sys; data=json.load(sys.stdin); assert any(e.get("kind")=="task_skip" for e in data.get("events",[])), data'
+
+# Approval-gated flow.
 DANGER_CREATE=$(curl -fsS -X POST "$CORE_URL/api/tasks/" \
   -H 'Content-Type: application/json' \
   -d '{"goal":"rm -rf /tmp/demo","max_attempts":2,"approval_required":false}')
@@ -60,7 +66,21 @@ DANGER_ID=$(printf '%s' "$DANGER_CREATE" | python -c 'import json,sys; print(jso
 DANGER_RUN=$(curl -fsS -X POST "$CORE_URL/api/tasks/$DANGER_ID/run")
 printf '%s' "$DANGER_RUN" | python -c 'import json,sys; data=json.load(sys.stdin); assert data.get("status") == "NEEDS_APPROVAL", data'
 
+# Approve + drift should invalidate approval.
 curl -fsS -X POST "$CORE_URL/api/tasks/$DANGER_ID/approve" >/dev/null
-curl -fsS -X POST "$CORE_URL/api/tasks/$DANGER_ID/run" >/dev/null
+
+python - <<PY
+import sqlite3
+from pathlib import Path
+root = Path.home() / "roampal-android"
+db = root / "backend" / "core" / "logs" / "tasks.db"
+conn = sqlite3.connect(db)
+conn.execute("update tasks set goal=? where task_id=?", ("rm -rf /tmp/demo_drifted", "$DANGER_ID"))
+conn.commit()
+print("drift injected for", "$DANGER_ID")
+PY
+
+DANGER_INVALIDATED=$(curl -fsS -X POST "$CORE_URL/api/tasks/$DANGER_ID/run")
+printf '%s' "$DANGER_INVALIDATED" | python -c 'import json,sys; data=json.load(sys.stdin); assert data.get("status") == "NEEDS_APPROVAL", data; assert any(e.get("kind")=="task_approval_invalidated" for e in data.get("events",[])), data'
 
 echo "✅ Full smoke completed successfully"

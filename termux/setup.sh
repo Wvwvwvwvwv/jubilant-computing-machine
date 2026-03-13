@@ -56,17 +56,6 @@ pydantic==1.10.21
 EOF
 fi
 
-if [ ! -f "$HOME/roampal-android/backend/core/requirements-termux.txt" ]; then
-    cat > "$HOME/roampal-android/backend/core/requirements-termux.txt" <<'EOF'
-fastapi==0.109.0
-uvicorn==0.27.0
-pydantic==1.10.21
-httpx==0.26.0
-python-multipart==0.0.6
-aiofiles==23.2.1
-EOF
-fi
-
 if [ ! -f "$HOME/roampal-android/backend/sandbox/requirements-termux.txt" ]; then
     cat > "$HOME/roampal-android/backend/sandbox/requirements-termux.txt" <<'EOF'
 fastapi==0.109.0
@@ -85,7 +74,6 @@ fi
 
 # Самовосстановление старых шаблонов: numpy ставим только через pkg (python-numpy),
 # т.к. pip на Python 3.13 в Termux часто уходит в source build и падает.
-sed -i '/^numpy==/d' "$HOME/roampal-android/backend/core/requirements-termux.txt" 2>/dev/null || true
 sed -i '/^numpy==/d' "$HOME/roampal-android/backend/embeddings/requirements-lite-termux.txt" 2>/dev/null || true
 
 # Установка KoboldCpp
@@ -129,12 +117,45 @@ mkdir -p "$HOME/roampal-android/data/sandbox"
 echo "🐍 Установка Python зависимостей..."
 CONSTRAINTS="$HOME/roampal-android/termux/constraints-termux.txt"
 
-# Защита от pydantic-core сборки на Termux
-$PIP_BIN uninstall -y pydantic pydantic-core >/dev/null 2>&1 || true
-$PIP_BIN install $PIP_FLAGS -c "$CONSTRAINTS" pydantic==1.10.21
+# Некоторые rust/maturin пакеты на Android требуют явный API level.
+if [ -z "${ANDROID_API_LEVEL:-}" ]; then
+    ANDROID_API_LEVEL="$(getprop ro.build.version.sdk 2>/dev/null || echo 24)"
+    export ANDROID_API_LEVEL
+    echo "ℹ️ ANDROID_API_LEVEL set to: $ANDROID_API_LEVEL"
+fi
 
-cd "$HOME/roampal-android/backend/core"
-$PIP_BIN install $PIP_FLAGS -c "$CONSTRAINTS" -r requirements-termux.txt
+echo "📦 Установка Poetry..."
+$PIP_BIN install $PIP_FLAGS poetry==1.8.3
+poetry config virtualenvs.create false
+
+cd "$HOME/roampal-android"
+# Для Termux (особенно Python 3.13) ставим только core runtime без heavy memory-группы,
+# иначе возможны падения сборки rust/maturin зависимостей (hf-xet и др.).
+if ! poetry install --only main --without memory --no-interaction --no-ansi; then
+    echo "⚠️ Poetry install failed (likely pydantic-core/rust build on Termux)."
+    echo "↪️ Fallback: installing core runtime via pip with Termux constraints (pydantic v1)."
+    echo "↪️ numpy is provided by Termux package (python-numpy), not pip (avoids source-build failures)."
+    $PIP_BIN install $PIP_FLAGS -c "$CONSTRAINTS" \
+        fastapi==0.109.0 \
+        uvicorn==0.27.0 \
+        pydantic==1.10.21 \
+        httpx==0.26.0 \
+        python-multipart==0.0.6 \
+        aiofiles==23.2.1 \
+        pypdf==4.2.0
+
+    echo "↪️ Optional OCR python deps (pytesseract/pillow): install best-effort only."
+    if ! $PIP_BIN install $PIP_FLAGS pytesseract==0.3.10 pillow==10.4.0; then
+        echo "⚠️ Optional OCR python deps failed to install; CLI tesseract path will be used if available."
+    fi
+fi
+
+if [ -n "${ROAMPAL_INSTALL_MEMORY_GROUP:-}" ]; then
+    echo "ℹ️ ROAMPAL_INSTALL_MEMORY_GROUP=1: пытаюсь установить memory group..."
+    if ! poetry install --only memory --no-interaction --no-ansi; then
+        echo "⚠️ Memory group install failed on this Termux environment; continuing with fallback in-memory store."
+    fi
+fi
 
 cd "$HOME/roampal-android/backend/sandbox"
 $PIP_BIN install $PIP_FLAGS -c "$CONSTRAINTS" -r requirements-termux.txt
@@ -159,7 +180,7 @@ python - <<'CHECK'
 import pydantic
 v = getattr(pydantic, '__version__', 'unknown')
 print(f"✅ pydantic version: {v}")
-if not v.startswith('1.10.'):
+if not (v.startswith('1.10.') or v.startswith('2.')):
     raise SystemExit(f"❌ Unexpected pydantic version on Termux: {v}")
 CHECK
 
