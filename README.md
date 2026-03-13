@@ -100,6 +100,7 @@ data/            - Персистентные данные
 - [Архитектура](docs/architecture.md)
 - [API](docs/api.md)
 - [Handoff v2](docs/handoff-v2.md)
+- [Companion Vision (STABLE/WILD, personality, voice)](docs/companion-vision.md)
 
 ## Backend dependency management
 
