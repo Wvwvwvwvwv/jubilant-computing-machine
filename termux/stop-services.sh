@@ -20,4 +20,7 @@ for pidfile in "$PID_DIR"/*.pid; do
     fi
 done
 
+# Best-effort cleanup for stale/untracked processes
+pkill -f 'koboldcpp.py|backend.core.main|backend/embeddings/main.py|frontend/node_modules/.bin/vite' 2>/dev/null || true
+
 echo "✅ Все сервисы остановлены"

@@ -2,8 +2,8 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import List
 
-from services.kobold_client import KoboldClient
-from services.memory_engine import MemoryEngine
+from backend.core.services.kobold_client import KoboldClient
+from backend.core.services.memory_engine import MemoryEngine
 
 router = APIRouter()
 kobold = KoboldClient()
@@ -29,7 +29,15 @@ class ChatResponse(BaseModel):
 
 def serialize_messages(messages: List[ChatMessage]) -> List[dict]:
     """Pydantic model -> plain dict для совместимости с KoboldClient."""
-    return [m.model_dump() for m in messages]
+    serialized = []
+    for m in messages:
+        # pydantic v2
+        if hasattr(m, "model_dump"):
+            serialized.append(m.model_dump())
+        else:
+            # pydantic v1 (Termux legacy/runtime drift)
+            serialized.append(m.dict())
+    return serialized
 
 
 @router.post("/", response_model=ChatResponse)

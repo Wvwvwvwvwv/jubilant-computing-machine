@@ -1,11 +1,13 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
 import uvicorn
 
-from routers import chat, memory, books, sandbox, tasks
-from services.memory_engine import MemoryEngine
-from services.task_runner import TaskRunner
+from backend.core.routers import books, chat, memory, sandbox, tasks
+from backend.core.services.memory_engine import MemoryEngine
+from backend.core.services.task_runner import TaskRunner
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -19,11 +21,12 @@ async def lifespan(app: FastAPI):
     app.state.task_runner.save_state()
     await app.state.memory_engine.close()
 
+
 app = FastAPI(
     title="Roampal Core API",
     description="Оркестратор для локального AI ассистента",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # CORS для frontend
@@ -42,6 +45,7 @@ app.include_router(books.router, prefix="/api/books", tags=["books"])
 app.include_router(sandbox.router, prefix="/api/sandbox", tags=["sandbox"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
 
+
 @app.get("/")
 async def root():
     return {
@@ -53,13 +57,15 @@ async def root():
             "books": "/api/books",
             "sandbox": "/api/sandbox",
             "tasks": "/api/tasks",
-            "docs": "/docs"
-        }
+            "docs": "/docs",
+        },
     }
+
 
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

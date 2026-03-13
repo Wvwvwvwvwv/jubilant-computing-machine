@@ -3,10 +3,12 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from routers.sandbox import CodeExecutionRequest, execute_code
-from services.task_runner import TaskRecord, TaskRunner
+from backend.core.routers.sandbox import CodeExecutionRequest, execute_code
+from backend.core.services.task_planner import TaskPlanner
+from backend.core.services.task_runner import TaskRecord, TaskRunner
 
 router = APIRouter()
+planner = TaskPlanner()
 
 
 class TaskCreateRequest(BaseModel):
@@ -89,14 +91,18 @@ async def run_task(task_id: str, req: Request):
     if not rec:
         raise HTTPException(status_code=404, detail="Task not found")
 
+    plan = await planner.build_plan(rec.goal)
+
     try:
-        # MVP: run task goal as bash command in sandbox.
-        result = await execute_code(CodeExecutionRequest(code=rec.goal, language="bash", timeout=30))
+        result = await execute_code(
+            CodeExecutionRequest(code=plan.code, language=plan.language, timeout=plan.timeout)
+        )
         updated = runner.run_with_result(
             task_id=task_id,
             exit_code=result.exit_code,
             stdout=result.stdout or "",
             stderr=result.stderr or "",
+            started_payload={"tool": plan.tool, "language": plan.language},
         )
         return to_response(updated)
     except HTTPException as exc:
@@ -108,6 +114,7 @@ async def run_task(task_id: str, req: Request):
             exit_code=exit_code,
             stdout="",
             stderr=str(exc.detail),
+            started_payload={"tool": plan.tool, "language": plan.language},
         )
         return to_response(updated)
     except Exception as exc:  # keep task state observable for unexpected errors
@@ -116,6 +123,7 @@ async def run_task(task_id: str, req: Request):
             exit_code=1,
             stdout="",
             stderr=str(exc),
+            started_payload={"tool": plan.tool, "language": plan.language},
         )
         return to_response(updated)
 
