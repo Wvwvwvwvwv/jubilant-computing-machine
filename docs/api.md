@@ -369,6 +369,162 @@ goal: "print(2+2)"               -> heuristic language=python
 }
 ```
 
+
+## Companion API (Port 8000)
+
+Base URL: `http://localhost:8000`
+
+### GET /api/companion/session
+
+Текущая сессионная политика поведения ассистента (`reasoning_mode`, `challenge_mode`, `initiative_mode`, `voice_mode`).
+
+### PATCH /api/companion/session
+
+Частичное обновление сессионной политики.
+
+Пример:
+```json
+{
+  "reasoning_mode": "wild",
+  "challenge_mode": "strict",
+  "initiative_mode": "proactive",
+  "voice_mode": "ptt"
+}
+```
+
+### GET /api/companion/last-response-trace
+
+Последний explainability trace по ответу ассистента. До появления ответа может вернуть `null`.
+
+Примечание: trace обновляется после успешного `POST /api/chat/` и отражает активные `reasoning_mode/challenge_mode`.
+Примечание: `relationship_used` в trace заполняется ID relationship-фактов, реально подмешанных в chat prompt.
+
+### GET /api/companion/response-traces?limit=50
+
+История explainability trace (в порядке накопления) для аудита динамики поведения.
+
+### GET /api/companion/relationship-profile
+
+Получить профиль relationship memory (стиль, дебат-предпочтения, инициативность).
+
+### PATCH /api/companion/relationship-profile
+
+Частичное обновление relationship profile.
+
+Пример:
+```json
+{
+  "style": {"verbosity": "high"},
+  "debate_preferences": {"strictness": "strict"}
+}
+```
+
+### POST /api/companion/relationship-facts
+
+Добавить relationship-факт.
+
+Пример:
+```json
+{
+  "fact": "Пользователь предпочитает сначала риски",
+  "source": {"type": "chat_message", "ref_id": "msg_1"},
+  "confidence": 0.8,
+  "ttl_days": 90
+}
+```
+
+### GET /api/companion/relationship-facts?query=...&limit=...
+
+Поиск активных relationship-фактов.
+
+### POST /api/companion/relationship-facts/{fact_id}/invalidate
+
+Ручная инвалидизация relationship-факта (status -> `invalidated`).
+
+### POST /api/companion/proposals/suggest
+
+Сгенерировать инициативное предложение по теме (`topic`, опционально `context`) с учетом `initiative_mode` и `challenge_mode` текущей сессии.
+
+- При `initiative_mode=off` вернётся `400`.
+- При `initiative_mode=proactive` предложение создаётся как `unsolicited=true`.
+
+### POST /api/companion/proposals
+
+Создать инициативное предложение (`reason`, `expected_value`, `risk_level`, `stop_condition`, `unsolicited`).
+Для `unsolicited=true` применяется профильный лимит `max_unsolicited_per_hour`.
+
+### GET /api/companion/proposals?status=open&limit=20
+
+Список предложений по статусу (`open|accepted|dismissed|all`).
+
+### POST /api/companion/proposals/{proposal_id}/accept
+
+Отметить предложение как принятое.
+
+### GET /api/companion/proposals/{proposal_id}/events?limit=50
+
+Получить audit trail по инициативному предложению (`created`, `status_accepted`, `status_dismissed` и т.д.).
+
+### POST /api/companion/proposals/{proposal_id}/dismiss
+
+Отметить предложение как отклонённое.
+
+## Voice API (Port 8000)
+
+Base URL: `http://localhost:8000`
+
+### POST /api/voice/session/start
+
+Старт локальной voice-сессии.
+
+Пример:
+```json
+{
+  "mode": "ptt",
+  "stt_engine": "local_whisper_cpp",
+  "tts_engine": "local_piper"
+}
+```
+
+### POST /api/voice/session/{voice_session_id}/stop
+
+Остановка voice-сессии.
+
+### GET /api/voice/session/{voice_session_id}/health
+
+Health-статус сессии (для MVP: synthetic health snapshot).
+
+Возвращает также активную voice-конфигурацию: `mode`, `stt_engine`, `tts_engine`.
+Теперь health включает поля проверки микрофона:
+- `microphone_verified` (`true|false`)
+- `microphone_source` (источник проверки)
+- `microphone_detail` (диагностическая строка)
+
+Если микрофон не подтвержден, `input_device=not_verified` и `stt=degraded`.
+
+### PATCH /api/voice/session/{voice_session_id}/metrics
+
+Обновить наблюдаемые voice-метрики для оценки readiness (`latency_p95_ms`, `crash_free_rate`, `audio_loss_percent`, `approval_bypass_incidents`, `user_score`).
+
+### POST /api/voice/session/{voice_session_id}/microphone/verify
+
+Записать результат проверки физического микрофона для текущей voice-сессии.
+
+Пример:
+```json
+{
+  "verified": true,
+  "source": "termux_microphone_record",
+  "detail": "bytes=16384"
+}
+```
+
+### GET /api/voice/session/{voice_session_id}/go-no-go
+
+Вернуть решение `GO|NO_GO` по критериям rollout и список проваленных checks.
+
+Важно: в checks добавлен `microphone_verified_true`; без подтверждения микрофона решение будет `NO_GO`.
+
 ## Embeddings Service (Port 8001)
 
 Base URL: `http://localhost:8001`

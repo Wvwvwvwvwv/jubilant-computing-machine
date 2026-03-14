@@ -1,7 +1,11 @@
+from typing import List
+import uuid
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from typing import List
 
+from backend.core.services.companion_memory import CompanionMemory
+from backend.core.services.companion_state import CompanionState
 from backend.core.services.kobold_client import KoboldClient
 from backend.core.services.memory_engine import MemoryEngine
 
@@ -40,17 +44,83 @@ def serialize_messages(messages: List[ChatMessage]) -> List[dict]:
     return serialized
 
 
+def build_companion_behavior_message(session) -> ChatMessage:
+    mode = session.reasoning_mode
+    challenge = session.challenge_mode
+    mode_clause = (
+        "Режим STABLE: отвечай структурно, аккуратно, с явной маркировкой неопределённости."
+        if mode == "stable"
+        else "Режим WILD: предлагай смелые гипотезы, но маркируй их как требующие проверки."
+    )
+
+    if challenge == "strict":
+        challenge_clause = "Обязательно приводи контрпозицию и проверяемые риски перед рекомендацией."
+    elif challenge == "balanced":
+        challenge_clause = "Если уместно, приводи краткую контрпозицию и ключевые риски."
+    else:
+        challenge_clause = "Не добавляй контрпозицию без явной необходимости."
+
+    return ChatMessage(
+        role="system",
+        content=(
+            "Политика поведения companion:\n"
+            f"- {mode_clause}\n"
+            f"- {challenge_clause}\n"
+            "- Разделяй факты, гипотезы и неизвестное."
+        ),
+    )
+
+
+def build_relationship_memory_message(facts: list[dict]) -> ChatMessage:
+    lines = [f"[Fact {x['fact_id']}]: {x['fact']}" for x in facts]
+    return ChatMessage(
+        role="system",
+        content=(
+            "Память отношений (используй как персональные предпочтения пользователя, если релевантно):\n"
+            + "\n".join(lines)
+        ),
+    )
+
+
+def infer_uncertainty_markers(text: str) -> list[str]:
+    lowered = (text or "").lower()
+    markers = []
+    if any(x in lowered for x in ["не уверен", "недостаточно данных", "неизвестно", "uncertain"]):
+        markers.append("insufficient_data")
+    if any(x in lowered for x in ["гипотез", "предполож", "возможно", "likely"]):
+        markers.append("hypothesis_present")
+    return markers
+
+
 @router.post("/", response_model=ChatResponse)
 async def chat(request: ChatRequest, req: Request):
-    """Чат с LLM через KoboldCpp с использованием памяти Roampal"""
+    """Чат с LLM через KoboldCpp с использованием памяти Roampal и companion-политик."""
 
     if not request.messages:
         raise HTTPException(status_code=400, detail="messages не может быть пустым")
 
     memory_engine: MemoryEngine = req.app.state.memory_engine
+    companion_state: CompanionState | None = getattr(req.app.state, "companion_state", None)
+    companion_memory: CompanionMemory | None = getattr(req.app.state, "companion_memory", None)
+
     context_items = 0
     memory_context = []
     query_text = request.messages[-1].content
+    working_messages = list(request.messages)
+    used_relationship_ids: list[str] = []
+
+    # Companion behavior policy injection (mode/challenge)
+    if companion_state is not None:
+        behavior_msg = build_companion_behavior_message(companion_state.get_session())
+        working_messages.insert(0, behavior_msg)
+
+    # Relationship memory injection (top active facts)
+    if companion_memory is not None:
+        relation_facts = companion_memory.list_facts(limit=3)
+        if relation_facts:
+            relation_payload = [{"fact_id": x.fact_id, "fact": x.fact} for x in relation_facts]
+            used_relationship_ids = [x["fact_id"] for x in relation_payload]
+            working_messages.insert(1 if companion_state is not None else 0, build_relationship_memory_message(relation_payload))
 
     # Получение релевантного контекста из памяти
     if request.use_memory:
@@ -59,22 +129,19 @@ async def chat(request: ChatRequest, req: Request):
 
         # Добавление контекста в промпт
         if memory_context:
-            context_text = "\n\n".join([
-                f"[Память {i + 1}]: {item['content']}"
-                for i, item in enumerate(memory_context)
-            ])
+            context_text = "\n\n".join([f"[Память {i + 1}]: {item['content']}" for i, item in enumerate(memory_context)])
 
             # Вставка контекста перед последним сообщением
             system_msg = ChatMessage(
                 role="system",
                 content=f"Релевантный контекст из памяти:\n{context_text}",
             )
-            request.messages.insert(-1, system_msg)
+            working_messages.insert(-1, system_msg)
 
     # Отправка в KoboldCpp
     try:
         response = await kobold.generate(
-            messages=serialize_messages(request.messages),
+            messages=serialize_messages(working_messages),
             max_tokens=request.max_tokens,
             temperature=request.temperature,
         )
@@ -85,6 +152,17 @@ async def chat(request: ChatRequest, req: Request):
                 query=query_text,
                 response=response,
                 context_used=memory_context,
+            )
+
+        # Запись explainability trace в companion state
+        if companion_state is not None:
+            sess = companion_state.get_session()
+            companion_state.set_last_trace(
+                response_id=f"resp_{uuid.uuid4().hex[:12]}",
+                relationship_used=used_relationship_ids,
+                uncertainty_markers=infer_uncertainty_markers(response),
+                counter_position_used=(sess.challenge_mode != "off"),
+                confidence=0.72 if sess.reasoning_mode == "stable" else 0.64,
             )
 
         return ChatResponse(

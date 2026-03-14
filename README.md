@@ -48,6 +48,22 @@ cd ~/roampal-android
 bash termux/full-smoke.sh
 ```
 
+### Voice readiness-check на устройстве
+```bash
+cd ~/roampal-android
+# Базовый прогон (PTT, женский голос, GO-метрики по умолчанию)
+bash termux/voice-readiness-check.sh
+
+# Строгий режим: завершится с code=1, если решение не GO
+MODE=duplex VOICE_GENDER=male bash termux/voice-readiness-check.sh --strict
+
+# сохранить JSON-отчёт прогона
+bash termux/voice-readiness-check.sh --json-out logs/voice-readiness.json
+
+# требовать подтверждение физического микрофона (Termux:API/arecord)
+bash termux/voice-readiness-check.sh --require-mic
+```
+
 Если видите "Ошибка соединения с сервером", запустите диагностику:
 ```bash
 cd ~/roampal-android
@@ -59,6 +75,16 @@ bash termux/diagnose.sh
 ```bash
 cd ~/roampal-android
 bash termux/verify-repo-integrity.sh ~/roampal-android work
+```
+
+### Очистка памяти от технических/тестовых записей
+```bash
+cd ~/roampal-android
+# сначала dry-run (показать кандидатов)
+bash termux/cleanup-memory-noise.sh
+
+# затем применить удаление
+bash termux/cleanup-memory-noise.sh --apply
 ```
 
 ### 5. Автоматическое развертывание (рекомендуется)
@@ -80,6 +106,8 @@ bash termux/deploy.sh work
 - ✅ Песочница для выполнения кода
 - ✅ Векторный поиск и эмбеддинги
 - ✅ MCP интеграция
+- ✅ Companion session API (STABLE/WILD, challenge/initiative/voice modes)
+- ✅ Voice control-plane API (start/stop/health for local voice sessions)
 - ✅ 100% локально, без облака
 
 ## Структура
@@ -101,6 +129,7 @@ data/            - Персистентные данные
 - [API](docs/api.md)
 - [Handoff v2](docs/handoff-v2.md)
 - [Companion Vision (STABLE/WILD, personality, voice)](docs/companion-vision.md)
+- [Companion Implementation Plan (API + DB + Voice Go/No-Go)](docs/companion-implementation-plan.md)
 
 ## Backend dependency management
 

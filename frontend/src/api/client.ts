@@ -105,4 +105,79 @@ export const tasksAPI = {
   }
 }
 
+
+export const companionAPI = {
+  getSession: async () => {
+    const { data } = await api.get('/companion/session')
+    return data
+  },
+
+  patchSession: async (patch: any) => {
+    const { data } = await api.patch('/companion/session', patch)
+    return data
+  },
+
+  getRelationshipProfile: async () => {
+    const { data } = await api.get('/companion/relationship-profile')
+    return data
+  },
+
+  patchRelationshipProfile: async (patch: any) => {
+    const { data } = await api.patch('/companion/relationship-profile', patch)
+    return data
+  },
+
+  getLastResponseTrace: async () => {
+    const { data } = await api.get('/companion/last-response-trace')
+    return data
+  },
+
+  getResponseTraces: async (limit: number = 5) => {
+    const { data } = await api.get('/companion/response-traces', { params: { limit } })
+    return data
+  }
+}
+
+
+export const voiceAPI = {
+  startSession: async (mode: 'ptt' | 'duplex' = 'ptt', voiceGender: 'male' | 'female' = 'female') => {
+    const ttsEngine = voiceGender === 'male' ? 'local_piper_male' : 'local_piper_female'
+    const { data } = await api.post('/voice/session/start', {
+      mode,
+      stt_engine: 'local_whisper_cpp',
+      tts_engine: ttsEngine
+    })
+    return data
+  },
+
+  stopSession: async (voiceSessionId: string) => {
+    const { data } = await api.post(`/voice/session/${voiceSessionId}/stop`)
+    return data
+  },
+
+  health: async (voiceSessionId: string) => {
+    const { data } = await api.get(`/voice/session/${voiceSessionId}/health`)
+    return data
+  },
+
+  updateMetrics: async (voiceSessionId: string, payload: any) => {
+    const { data } = await api.patch(`/voice/session/${voiceSessionId}/metrics`, payload)
+    return data
+  },
+
+  verifyMicrophone: async (voiceSessionId: string, verified: boolean, source: string, detail: string = '') => {
+    const { data } = await api.post(`/voice/session/${voiceSessionId}/microphone/verify`, {
+      verified,
+      source,
+      detail
+    })
+    return data
+  },
+
+  goNoGo: async (voiceSessionId: string) => {
+    const { data } = await api.get(`/voice/session/${voiceSessionId}/go-no-go`)
+    return data
+  }
+}
+
 export default api
