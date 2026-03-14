@@ -63,6 +63,10 @@ bash termux/voice-readiness-check.sh --json-out logs/voice-readiness.json
 # требовать подтверждение физического микрофона (Termux:API/arecord)
 bash termux/voice-readiness-check.sh --require-mic
 
+# если прямой probe недоступен, скрипт в интерактивном TTY предложит ручное подтверждение
+# (ответьте y, если видите реальную активность микрофона на устройстве)
+bash termux/voice-readiness-check.sh
+
 # ручной override, если физическая проверка недоступна в текущем окружении
 bash termux/voice-readiness-check.sh --manual-mic-ok
 ```

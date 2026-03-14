@@ -118,6 +118,24 @@ check_microphone_physical() {
     exit 1
   fi
 
+  # Interactive operator fallback for real-device runs where direct Termux/ALSA probes
+  # are unavailable but user can confirm microphone activity (e.g. browser indicator).
+  if [ -t 0 ]; then
+    echo "[prompt] Physical mic probe unavailable. Confirm microphone works on device? (y/N)"
+    read -r answer || answer="n"
+    case "$answer" in
+      [yY]|[yY][eE][sS])
+        MIC_CHECK_OK=1
+        MIC_CHECK_SOURCE="operator_confirmed"
+        MIC_CHECK_DETAIL="operator confirmed microphone activity"
+        echo "[info] microphone accepted via operator confirmation"
+        return 0
+        ;;
+      *)
+        ;;
+    esac
+  fi
+
   MIC_CHECK_OK=0
   MIC_CHECK_SOURCE="unverified"
   MIC_CHECK_DETAIL="no physical microphone verification path succeeded"
