@@ -59,6 +59,9 @@ MODE=duplex VOICE_GENDER=male bash termux/voice-readiness-check.sh --strict
 
 # сохранить JSON-отчёт прогона
 bash termux/voice-readiness-check.sh --json-out logs/voice-readiness.json
+
+# требовать подтверждение физического микрофона (Termux:API/arecord)
+bash termux/voice-readiness-check.sh --require-mic
 ```
 
 Если видите "Ошибка соединения с сервером", запустите диагностику:

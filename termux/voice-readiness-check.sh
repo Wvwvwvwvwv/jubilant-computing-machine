@@ -14,6 +14,7 @@ VOICE_GENDER="${VOICE_GENDER:-female}"  # female | male
 STRICT=0
 KEEP_SESSION=0
 JSON_OUT=""
+REQUIRE_MIC=0
 
 # Defaults correspond to MVP GO thresholds.
 LATENCY_P95_MS="${LATENCY_P95_MS:-1800}"
@@ -36,6 +37,10 @@ while [[ $# -gt 0 ]]; do
       JSON_OUT="$2"
       shift 2
       ;;
+    --require-mic)
+      REQUIRE_MIC=1
+      shift
+      ;;
     *)
       echo "Unknown arg: $1" >&2
       exit 2
@@ -50,10 +55,56 @@ else
 fi
 
 echo "[info] CORE_URL=$CORE_URL"
-echo "[info] mode=$MODE voice_gender=$VOICE_GENDER tts_engine=$TTS_ENGINE strict=$STRICT keep_session=$KEEP_SESSION"
+echo "[info] mode=$MODE voice_gender=$VOICE_GENDER tts_engine=$TTS_ENGINE strict=$STRICT keep_session=$KEEP_SESSION require_mic=$REQUIRE_MIC"
 if [[ -n "$JSON_OUT" ]]; then
   echo "[info] json_out=$JSON_OUT"
 fi
+
+check_microphone_physical() {
+  echo "[step] microphone preflight"
+
+  # Preferred path on Android/Termux with Termux:API.
+  if command -v termux-microphone-record >/dev/null 2>&1; then
+    local rec_file
+    rec_file="$(mktemp /tmp/voice-mic-check-XXXXXX.m4a)"
+
+    if termux-microphone-record -f "$rec_file" -l 2 >/dev/null 2>&1; then
+      sleep 3
+      termux-microphone-record -q >/dev/null 2>&1 || true
+      if [[ -s "$rec_file" ]]; then
+        echo "[info] microphone capture check: OK (termux-microphone-record, bytes=$(wc -c < "$rec_file"))"
+        rm -f "$rec_file"
+        return 0
+      fi
+      echo "[warn] microphone capture file is empty ($rec_file)" >&2
+      rm -f "$rec_file"
+    else
+      echo "[warn] termux-microphone-record start failed (permission/device?)" >&2
+      termux-microphone-record -q >/dev/null 2>&1 || true
+      rm -f "$rec_file" >/dev/null 2>&1 || true
+    fi
+  fi
+
+  # ALSA fallback (if available).
+  if command -v arecord >/dev/null 2>&1; then
+    local cards
+    cards="$(arecord -l 2>/dev/null || true)"
+    if printf '%s' "$cards" | grep -qi 'card'; then
+      echo "[info] microphone capture devices detected via arecord"
+      return 0
+    fi
+    echo "[warn] arecord found but no capture cards detected" >&2
+  fi
+
+  if [[ "$REQUIRE_MIC" -eq 1 ]]; then
+    echo "[error] physical microphone check failed and --require-mic is set" >&2
+    exit 1
+  fi
+
+  echo "[warn] physical microphone could not be verified in this environment; continuing" >&2
+}
+
+check_microphone_physical
 
 api_call() {
   local method="$1"
