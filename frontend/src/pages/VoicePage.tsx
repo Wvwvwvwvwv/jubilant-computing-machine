@@ -25,6 +25,20 @@ export default function VoicePage() {
 
   const isVoiceEnabled = Boolean(sessionId)
 
+  const syncMicVerification = async (
+    sid: string | undefined,
+    verified: boolean,
+    source: string,
+    detail: string
+  ) => {
+    if (!sid) return
+    try {
+      await voiceAPI.verifyMicrophone(sid, verified, source, detail)
+    } catch {
+      // Keep UI responsive: health/go-no-go refresh can retry verification later.
+    }
+  }
+
   useEffect(() => {
     return () => {
       if (micStreamRef.current) {
@@ -47,14 +61,14 @@ export default function VoicePage() {
       setMicStatus('connected')
       const sid = voiceSessionId || sessionId
       if (sid) {
-        await voiceAPI.verifyMicrophone(sid, true, 'browser_getUserMedia', track?.label || 'default microphone')
+        await syncMicVerification(sid, true, 'browser_getUserMedia', track?.label || 'default microphone')
       }
     } catch (e: any) {
       setMicStatus('error')
       setMicError(e?.message || 'Не удалось получить доступ к микрофону')
       const sid = voiceSessionId || sessionId
       if (sid) {
-        await voiceAPI.verifyMicrophone(sid, false, 'browser_getUserMedia', e?.message || 'mic access failed')
+        await syncMicVerification(sid, false, 'browser_getUserMedia', e?.message || 'mic access failed')
       }
     }
   }
@@ -69,7 +83,7 @@ export default function VoicePage() {
     setMicError(null)
     const sid = voiceSessionId || sessionId
     if (sid) {
-      void voiceAPI.verifyMicrophone(sid, false, 'browser_disconnect', 'microphone disconnected by user')
+      void syncMicVerification(sid, false, 'browser_disconnect', 'microphone disconnected by user')
     }
   }
 
@@ -83,6 +97,8 @@ export default function VoicePage() {
       setGoNoGo(null)
       if (micStatus !== 'connected') {
         await connectMic(data.voice_session_id)
+      } else {
+        await syncMicVerification(data.voice_session_id, true, 'ui_session_start_sync', micLabel || 'connected before session start')
       }
     } catch (e: any) {
       setError(e?.response?.data?.detail || e?.message || 'Не удалось стартовать voice session')
@@ -121,6 +137,10 @@ export default function VoicePage() {
     try {
       setLoading(true)
       setError(null)
+      // Re-sync mic state before health/go-no-go in case browser verify event was missed.
+      if (micStatus === 'connected') {
+        await syncMicVerification(sessionId, true, 'ui_refresh_sync', micLabel || 'connected microphone')
+      }
       const [h, g] = await Promise.all([
         voiceAPI.health(sessionId),
         voiceAPI.goNoGo(sessionId),
