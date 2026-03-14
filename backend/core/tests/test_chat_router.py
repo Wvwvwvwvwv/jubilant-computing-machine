@@ -1,4 +1,22 @@
-from backend.core.routers.chat import ChatMessage, serialize_messages
+from types import SimpleNamespace
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from backend.core.routers import chat as chat_router
+from backend.core.routers.chat import ChatMessage, build_companion_behavior_message, serialize_messages
+from backend.core.services.companion_state import CompanionState
+
+
+class FakeMemoryEngine:
+    async def search(self, query: str, limit: int = 5):
+        return []
+
+    async def add_interaction(self, query: str, response: str, context_used):
+        return "interaction_1"
+
+    async def record_outcome(self, interaction_id: str, helpful: bool):
+        return None
 
 
 def test_serialize_messages_with_pydantic_v2_models():
@@ -19,3 +37,56 @@ def test_serialize_messages_with_pydantic_v1_like_objects():
     msgs = [LegacyMsg(role="assistant", content="ok")]
     data = serialize_messages(msgs)  # type: ignore[arg-type]
     assert data == [{"role": "assistant", "content": "ok"}]
+
+
+def test_build_companion_behavior_message_reflects_modes():
+    state = CompanionState()
+    stable_msg = build_companion_behavior_message(state.get_session())
+    assert "Режим STABLE" in stable_msg.content
+
+    state.update_session(reasoning_mode="wild", challenge_mode="strict")
+    wild_msg = build_companion_behavior_message(state.get_session())
+    assert "Режим WILD" in wild_msg.content
+    assert "контрпозицию" in wild_msg.content
+
+
+def test_chat_endpoint_writes_trace_and_injects_policy(monkeypatch):
+    app = FastAPI()
+    app.include_router(chat_router.router, prefix="/api/chat")
+    app.state.memory_engine = FakeMemoryEngine()
+    app.state.companion_state = CompanionState()
+    app.state.companion_state.update_session(reasoning_mode="wild", challenge_mode="balanced")
+
+    captured = {}
+
+    async def fake_generate(messages, max_tokens=512, temperature=0.7):
+        captured["messages"] = messages
+        return "Возможно это гипотеза, недостаточно данных для уверенности."
+
+    monkeypatch.setattr(chat_router.kobold, "generate", fake_generate)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/chat/",
+        json={
+            "messages": [{"role": "user", "content": "Сделай анализ"}],
+            "use_memory": False,
+            "max_tokens": 64,
+            "temperature": 0.2,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["memory_used"] is False
+
+    # companion policy should be injected as first system message
+    first_msg = captured["messages"][0]
+    assert first_msg["role"] == "system"
+    assert "Политика поведения companion" in first_msg["content"]
+
+    trace = app.state.companion_state.get_last_trace()
+    assert trace is not None
+    assert trace.reasoning_mode == "wild"
+    assert trace.challenge_mode == "balanced"
+    assert "insufficient_data" in trace.uncertainty_markers
+    assert trace.counter_position_used is True
