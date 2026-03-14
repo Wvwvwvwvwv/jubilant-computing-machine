@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { voiceAPI } from '../api/client'
 
 type GoNoGo = {
@@ -18,7 +18,48 @@ export default function VoicePage() {
   const [health, setHealth] = useState<any | null>(null)
   const [goNoGo, setGoNoGo] = useState<GoNoGo | null>(null)
 
+  const [micStatus, setMicStatus] = useState<'idle' | 'connected' | 'error'>('idle')
+  const [micError, setMicError] = useState<string | null>(null)
+  const [micLabel, setMicLabel] = useState<string>('')
+  const micStreamRef = useRef<MediaStream | null>(null)
+
   const isVoiceEnabled = Boolean(sessionId)
+
+  useEffect(() => {
+    return () => {
+      if (micStreamRef.current) {
+        micStreamRef.current.getTracks().forEach((t) => t.stop())
+        micStreamRef.current = null
+      }
+    }
+  }, [])
+
+  const connectMic = async () => {
+    try {
+      setMicError(null)
+      if (micStreamRef.current) {
+        micStreamRef.current.getTracks().forEach((t) => t.stop())
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      micStreamRef.current = stream
+      const track = stream.getAudioTracks()[0]
+      setMicLabel(track?.label || 'default microphone')
+      setMicStatus('connected')
+    } catch (e: any) {
+      setMicStatus('error')
+      setMicError(e?.message || 'Не удалось получить доступ к микрофону')
+    }
+  }
+
+  const disconnectMic = () => {
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach((t) => t.stop())
+      micStreamRef.current = null
+    }
+    setMicStatus('idle')
+    setMicLabel('')
+    setMicError(null)
+  }
 
   const startSession = async () => {
     try {
@@ -28,6 +69,9 @@ export default function VoicePage() {
       setSessionId(data.voice_session_id)
       setHealth(null)
       setGoNoGo(null)
+      if (micStatus !== 'connected') {
+        await connectMic()
+      }
     } catch (e: any) {
       setError(e?.response?.data?.detail || e?.message || 'Не удалось стартовать voice session')
     } finally {
@@ -44,6 +88,7 @@ export default function VoicePage() {
       setSessionId('')
       setHealth(null)
       setGoNoGo(null)
+      disconnectMic()
     } catch (e: any) {
       setError(e?.response?.data?.detail || e?.message || 'Не удалось остановить voice session')
     } finally {
@@ -145,6 +190,22 @@ export default function VoicePage() {
           <button onClick={applyGoodMetrics} disabled={loading || !sessionId} style={{ padding: '0.5rem 0.8rem' }}>Apply MVP GO metrics</button>
         </div>
         <div style={{ marginTop: '0.75rem', color: '#aaa' }}>session_id: {sessionId || '—'}</div>
+      </section>
+
+      <section style={{ border: '1px solid #333', borderRadius: '0.75rem', padding: '1rem', marginBottom: '1rem' }}>
+        <h3 style={{ marginTop: 0 }}>Microphone</h3>
+        <div style={{ marginBottom: '0.5rem' }}>
+          Status:{' '}
+          <strong style={{ color: micStatus === 'connected' ? '#22c55e' : micStatus === 'error' ? '#ef4444' : '#aaa' }}>
+            {micStatus}
+          </strong>
+        </div>
+        {micLabel && <div style={{ marginBottom: '0.5rem' }}>Device: {micLabel}</div>}
+        {micError && <div style={{ marginBottom: '0.5rem', color: '#fca5a5' }}>{micError}</div>}
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button onClick={connectMic} disabled={loading} style={{ padding: '0.5rem 0.8rem' }}>Подключить микрофон</button>
+          <button onClick={disconnectMic} disabled={loading || micStatus !== 'connected'} style={{ padding: '0.5rem 0.8rem' }}>Отключить микрофон</button>
+        </div>
       </section>
 
       <section style={{ border: '1px solid #333', borderRadius: '0.75rem', padding: '1rem', marginBottom: '1rem' }}>
