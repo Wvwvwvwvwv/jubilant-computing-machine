@@ -153,6 +153,16 @@ def test_initiative_proposals_lifecycle_and_rate_limit(tmp_path):
     assert dismissed.json()["status"] == "dismissed"
 
 
+    events = client.get(f'/api/companion/proposals/{proposal_id}/events', params={'limit': 10})
+    assert events.status_code == 200
+    edata = events.json()
+    assert edata['count'] >= 3
+    kinds = [x['event_kind'] for x in edata['items']]
+    assert 'created' in kinds
+    assert 'status_accepted' in kinds
+    assert 'status_dismissed' in kinds
+
+
 def test_suggest_proposal_respects_initiative_mode_and_creates_item(tmp_path):
     client = make_client(tmp_path)
 
@@ -183,3 +193,9 @@ def test_suggest_proposal_respects_initiative_mode_and_creates_item(tmp_path):
     listed = client.get('/api/companion/proposals', params={'status': 'open', 'limit': 10})
     assert listed.status_code == 200
     assert listed.json()['count'] >= 1
+
+
+def test_proposal_events_not_found_returns_404(tmp_path):
+    client = make_client(tmp_path)
+    response = client.get('/api/companion/proposals/pr_missing/events')
+    assert response.status_code == 404

@@ -53,6 +53,14 @@ class InitiativeProposal:
     updated_at: float
 
 
+
+
+@dataclass
+class InitiativeProposalEvent:
+    ts: float
+    event_kind: str
+    payload: dict
+
 class CompanionMemory:
     def __init__(self):
         logs_dir = Path(__file__).resolve().parents[1] / "logs"
@@ -517,3 +525,38 @@ class CompanionMemory:
             )
 
         return self.get_proposal(proposal_id)
+
+
+    def list_proposal_events(self, proposal_id: str, limit: int = 50) -> list[InitiativeProposalEvent]:
+        limit = max(1, min(int(limit), 500))
+        with self._db() as conn:
+            row = conn.execute("SELECT proposal_id FROM initiative_proposals WHERE proposal_id=?", (proposal_id,)).fetchone()
+            if not row:
+                raise ValueError("proposal not found")
+            rows = conn.execute(
+                """
+                SELECT ts, event_kind, payload_json
+                FROM initiative_proposal_events
+                WHERE proposal_id=?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (proposal_id, limit),
+            ).fetchall()
+
+        events: list[InitiativeProposalEvent] = []
+        for row in rows:
+            try:
+                payload = json.loads(row["payload_json"])
+            except json.JSONDecodeError:
+                payload = {}
+            events.append(
+                InitiativeProposalEvent(
+                    ts=float(row["ts"]),
+                    event_kind=row["event_kind"],
+                    payload=payload,
+                )
+            )
+
+        events.reverse()
+        return events

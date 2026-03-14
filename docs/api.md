@@ -457,6 +457,10 @@ Base URL: `http://localhost:8000`
 
 Отметить предложение как принятое.
 
+### GET /api/companion/proposals/{proposal_id}/events?limit=50
+
+Получить audit trail по инициативному предложению (`created`, `status_accepted`, `status_dismissed` и т.д.).
+
 ### POST /api/companion/proposals/{proposal_id}/dismiss
 
 Отметить предложение как отклонённое.

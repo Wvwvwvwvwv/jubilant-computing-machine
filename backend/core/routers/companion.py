@@ -134,6 +134,17 @@ class InitiativeProposalListResponse(BaseModel):
     count: int
 
 
+class InitiativeProposalEventResponse(BaseModel):
+    ts: float
+    event_kind: str
+    payload: dict
+
+
+class InitiativeProposalEventsResponse(BaseModel):
+    items: list[InitiativeProposalEventResponse]
+    count: int
+
+
 
 
 def _build_suggestion_payload(topic: str, context: str | None, strict: bool) -> dict:
@@ -347,6 +358,23 @@ async def list_proposals(req: Request, status: str = "open", limit: int = 20):
         raise HTTPException(status_code=400, detail=str(exc))
     mapped = [_proposal_to_response(x) for x in items]
     return InitiativeProposalListResponse(items=mapped, count=len(mapped))
+
+
+
+
+@router.get("/proposals/{proposal_id}/events", response_model=InitiativeProposalEventsResponse)
+async def list_proposal_events(proposal_id: str, req: Request, limit: int = 50):
+    memory: CompanionMemory = req.app.state.companion_memory
+    try:
+        events = memory.list_proposal_events(proposal_id=proposal_id, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    items = [
+        InitiativeProposalEventResponse(ts=e.ts, event_kind=e.event_kind, payload=e.payload)
+        for e in events
+    ]
+    return InitiativeProposalEventsResponse(items=items, count=len(items))
 
 
 @router.post("/proposals/{proposal_id}/dismiss", response_model=InitiativeProposalResponse)
