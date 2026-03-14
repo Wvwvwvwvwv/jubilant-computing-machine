@@ -437,6 +437,13 @@ Base URL: `http://localhost:8000`
 
 Ручная инвалидизация relationship-факта (status -> `invalidated`).
 
+### POST /api/companion/proposals/suggest
+
+Сгенерировать инициативное предложение по теме (`topic`, опционально `context`) с учетом `initiative_mode` и `challenge_mode` текущей сессии.
+
+- При `initiative_mode=off` вернётся `400`.
+- При `initiative_mode=proactive` предложение создаётся как `unsolicited=true`.
+
 ### POST /api/companion/proposals
 
 Создать инициативное предложение (`reason`, `expected_value`, `risk_level`, `stop_condition`, `unsolicited`).

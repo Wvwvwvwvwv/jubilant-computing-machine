@@ -151,3 +151,35 @@ def test_initiative_proposals_lifecycle_and_rate_limit(tmp_path):
     dismissed = client.post(f"/api/companion/proposals/{proposal_id}/dismiss")
     assert dismissed.status_code == 200
     assert dismissed.json()["status"] == "dismissed"
+
+
+def test_suggest_proposal_respects_initiative_mode_and_creates_item(tmp_path):
+    client = make_client(tmp_path)
+
+    # off mode must block suggestion
+    blocked = client.patch('/api/companion/session', json={'initiative_mode': 'off'})
+    assert blocked.status_code == 200
+
+    denied = client.post(
+        '/api/companion/proposals/suggest',
+        json={'topic': 'план миграции схемы', 'context': 'prod schema update'},
+    )
+    assert denied.status_code == 400
+    assert 'initiative mode is off' in denied.json()['detail']
+
+    # proactive mode should generate unsolicited proposal
+    enabled = client.patch('/api/companion/session', json={'initiative_mode': 'proactive', 'challenge_mode': 'strict'})
+    assert enabled.status_code == 200
+
+    suggested = client.post(
+        '/api/companion/proposals/suggest',
+        json={'topic': 'план миграции схемы', 'context': 'prod schema update'},
+    )
+    assert suggested.status_code == 200
+    pdata = suggested.json()
+    assert pdata['unsolicited'] is True
+    assert pdata['risk_level'] in {'medium', 'high'}
+
+    listed = client.get('/api/companion/proposals', params={'status': 'open', 'limit': 10})
+    assert listed.status_code == 200
+    assert listed.json()['count'] >= 1

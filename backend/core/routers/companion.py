@@ -110,6 +110,12 @@ class InitiativeProposalCreateRequest(BaseModel):
     unsolicited: bool = False
 
 
+
+
+class InitiativeSuggestionRequest(BaseModel):
+    topic: str = Field(..., min_length=3, max_length=2000)
+    context: Optional[str] = Field(default=None, max_length=4000)
+
 class InitiativeProposalResponse(BaseModel):
     proposal_id: str
     text: str
@@ -126,6 +132,37 @@ class InitiativeProposalResponse(BaseModel):
 class InitiativeProposalListResponse(BaseModel):
     items: list[InitiativeProposalResponse]
     count: int
+
+
+
+
+def _build_suggestion_payload(topic: str, context: str | None, strict: bool) -> dict:
+    text = f"Предлагаю следующий шаг по теме: {topic.strip()}"
+    reason = "Снижает неопределённость и ускоряет валидацию гипотез"
+    if context:
+        reason = f"Контекст: {context.strip()[:240]}. " + reason
+
+    lower = (topic + " " + (context or "")).lower()
+    risk = "low"
+    if any(x in lower for x in ["rm -rf", "sudo", "delete", "prod", "iptables", "shutdown"]):
+        risk = "high"
+    elif any(x in lower for x in ["migrate", "deploy", "schema", "rollback"]):
+        risk = "medium"
+
+    expected_value = "Понятный следующий шаг и измеримый прогресс"
+    stop_condition = (
+        "Остановиться после одного проверенного шага и переоценить риски"
+        if strict
+        else "Остановиться после первого подтверждённого результата"
+    )
+
+    return {
+        "text": text,
+        "reason": reason,
+        "expected_value": expected_value,
+        "risk_level": risk,
+        "stop_condition": stop_condition,
+    }
 
 
 def _proposal_to_response(proposal) -> InitiativeProposalResponse:
@@ -248,6 +285,40 @@ async def invalidate_relationship_fact(fact_id: str, req: Request):
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return _fact_to_response(updated)
+
+
+
+
+@router.post("/proposals/suggest", response_model=InitiativeProposalResponse)
+async def suggest_proposal(body: InitiativeSuggestionRequest, req: Request):
+    memory: CompanionMemory = req.app.state.companion_memory
+    state: CompanionState = req.app.state.companion_state
+
+    sess = state.get_session()
+    if sess.initiative_mode == "off":
+        raise HTTPException(status_code=400, detail="initiative mode is off")
+
+    payload = _build_suggestion_payload(
+        topic=body.topic,
+        context=body.context,
+        strict=(sess.challenge_mode == "strict"),
+    )
+
+    unsolicited = sess.initiative_mode == "proactive"
+
+    try:
+        proposal = memory.add_proposal(
+            text=payload["text"],
+            reason=payload["reason"],
+            expected_value=payload["expected_value"],
+            risk_level=payload["risk_level"],
+            stop_condition=payload["stop_condition"],
+            unsolicited=unsolicited,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return _proposal_to_response(proposal)
 
 
 @router.post("/proposals", response_model=InitiativeProposalResponse)
