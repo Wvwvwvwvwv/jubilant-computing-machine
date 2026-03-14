@@ -34,7 +34,7 @@ export default function VoicePage() {
     }
   }, [])
 
-  const connectMic = async () => {
+  const connectMic = async (voiceSessionId?: string) => {
     try {
       setMicError(null)
       if (micStreamRef.current) {
@@ -45,19 +45,21 @@ export default function VoicePage() {
       const track = stream.getAudioTracks()[0]
       setMicLabel(track?.label || 'default microphone')
       setMicStatus('connected')
-      if (sessionId) {
-        await voiceAPI.verifyMicrophone(sessionId, true, 'browser_getUserMedia', track?.label || 'default microphone')
+      const sid = voiceSessionId || sessionId
+      if (sid) {
+        await voiceAPI.verifyMicrophone(sid, true, 'browser_getUserMedia', track?.label || 'default microphone')
       }
     } catch (e: any) {
       setMicStatus('error')
       setMicError(e?.message || 'Не удалось получить доступ к микрофону')
-      if (sessionId) {
-        await voiceAPI.verifyMicrophone(sessionId, false, 'browser_getUserMedia', e?.message || 'mic access failed')
+      const sid = voiceSessionId || sessionId
+      if (sid) {
+        await voiceAPI.verifyMicrophone(sid, false, 'browser_getUserMedia', e?.message || 'mic access failed')
       }
     }
   }
 
-  const disconnectMic = () => {
+  const disconnectMic = (voiceSessionId?: string) => {
     if (micStreamRef.current) {
       micStreamRef.current.getTracks().forEach((t) => t.stop())
       micStreamRef.current = null
@@ -65,8 +67,9 @@ export default function VoicePage() {
     setMicStatus('idle')
     setMicLabel('')
     setMicError(null)
-    if (sessionId) {
-      void voiceAPI.verifyMicrophone(sessionId, false, 'browser_disconnect', 'microphone disconnected by user')
+    const sid = voiceSessionId || sessionId
+    if (sid) {
+      void voiceAPI.verifyMicrophone(sid, false, 'browser_disconnect', 'microphone disconnected by user')
     }
   }
 
@@ -79,7 +82,7 @@ export default function VoicePage() {
       setHealth(null)
       setGoNoGo(null)
       if (micStatus !== 'connected') {
-        await connectMic()
+        await connectMic(data.voice_session_id)
       }
     } catch (e: any) {
       setError(e?.response?.data?.detail || e?.message || 'Не удалось стартовать voice session')
@@ -94,10 +97,10 @@ export default function VoicePage() {
       setLoading(true)
       setError(null)
       await voiceAPI.stopSession(sessionId)
+      disconnectMic(sessionId)
       setSessionId('')
       setHealth(null)
       setGoNoGo(null)
-      disconnectMic()
     } catch (e: any) {
       setError(e?.response?.data?.detail || e?.message || 'Не удалось остановить voice session')
     } finally {
@@ -212,8 +215,8 @@ export default function VoicePage() {
         {micLabel && <div style={{ marginBottom: '0.5rem' }}>Device: {micLabel}</div>}
         {micError && <div style={{ marginBottom: '0.5rem', color: '#fca5a5' }}>{micError}</div>}
         <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button onClick={connectMic} disabled={loading} style={{ padding: '0.5rem 0.8rem' }}>Подключить микрофон</button>
-          <button onClick={disconnectMic} disabled={loading || micStatus !== 'connected'} style={{ padding: '0.5rem 0.8rem' }}>Отключить микрофон</button>
+          <button onClick={() => void connectMic()} disabled={loading} style={{ padding: '0.5rem 0.8rem' }}>Подключить микрофон</button>
+          <button onClick={() => disconnectMic()} disabled={loading || micStatus !== 'connected'} style={{ padding: '0.5rem 0.8rem' }}>Отключить микрофон</button>
         </div>
       </section>
 

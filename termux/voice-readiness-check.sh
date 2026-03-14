@@ -7,6 +7,7 @@ set -euo pipefail
 #   MODE=duplex VOICE_GENDER=male bash termux/voice-readiness-check.sh --strict
 #   bash termux/voice-readiness-check.sh --keep-session
 #   bash termux/voice-readiness-check.sh --json-out logs/voice-readiness.json
+#   bash termux/voice-readiness-check.sh --manual-mic-ok
 
 CORE_URL="${CORE_URL:-http://127.0.0.1:8000}"
 MODE="${MODE:-ptt}"               # ptt | duplex
@@ -15,6 +16,7 @@ STRICT=0
 KEEP_SESSION=0
 JSON_OUT=""
 REQUIRE_MIC=0
+MANUAL_MIC_OK=0
 MIC_CHECK_OK=0
 MIC_CHECK_SOURCE="unverified"
 MIC_CHECK_DETAIL=""
@@ -44,6 +46,10 @@ while [[ $# -gt 0 ]]; do
       REQUIRE_MIC=1
       shift
       ;;
+    --manual-mic-ok)
+      MANUAL_MIC_OK=1
+      shift
+      ;;
     *)
       echo "Unknown arg: $1" >&2
       exit 2
@@ -58,7 +64,7 @@ else
 fi
 
 echo "[info] CORE_URL=$CORE_URL"
-echo "[info] mode=$MODE voice_gender=$VOICE_GENDER tts_engine=$TTS_ENGINE strict=$STRICT keep_session=$KEEP_SESSION require_mic=$REQUIRE_MIC"
+echo "[info] mode=$MODE voice_gender=$VOICE_GENDER tts_engine=$TTS_ENGINE strict=$STRICT keep_session=$KEEP_SESSION require_mic=$REQUIRE_MIC manual_mic_ok=$MANUAL_MIC_OK"
 if [[ -n "$JSON_OUT" ]]; then
   echo "[info] json_out=$JSON_OUT"
 fi
@@ -120,6 +126,13 @@ check_microphone_physical() {
 }
 
 check_microphone_physical
+
+if [[ "$MIC_CHECK_OK" -eq 0 && "$MANUAL_MIC_OK" -eq 1 ]]; then
+  echo "[warn] applying manual microphone override (--manual-mic-ok)"
+  MIC_CHECK_OK=1
+  MIC_CHECK_SOURCE="manual_override"
+  MIC_CHECK_DETAIL="manual override accepted by operator"
+fi
 
 api_call() {
   local method="$1"
