@@ -11,17 +11,20 @@ type GoNoGo = {
 
 export default function VoicePage() {
   const [mode, setMode] = useState<'ptt' | 'duplex'>('ptt')
+  const [voiceGender, setVoiceGender] = useState<'male' | 'female'>('female')
   const [sessionId, setSessionId] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [health, setHealth] = useState<any | null>(null)
   const [goNoGo, setGoNoGo] = useState<GoNoGo | null>(null)
 
+  const isVoiceEnabled = Boolean(sessionId)
+
   const startSession = async () => {
     try {
       setLoading(true)
       setError(null)
-      const data = await voiceAPI.startSession(mode)
+      const data = await voiceAPI.startSession(mode, voiceGender)
       setSessionId(data.voice_session_id)
       setHealth(null)
       setGoNoGo(null)
@@ -38,12 +41,21 @@ export default function VoicePage() {
       setLoading(true)
       setError(null)
       await voiceAPI.stopSession(sessionId)
+      setSessionId('')
       setHealth(null)
       setGoNoGo(null)
     } catch (e: any) {
       setError(e?.response?.data?.detail || e?.message || 'Не удалось остановить voice session')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const toggleVoice = async () => {
+    if (isVoiceEnabled) {
+      await stopSession()
+    } else {
+      await startSession()
     }
   }
 
@@ -108,13 +120,27 @@ export default function VoicePage() {
           <select
             value={mode}
             onChange={(e) => setMode(e.target.value as 'ptt' | 'duplex')}
+            disabled={loading || isVoiceEnabled}
             style={{ padding: '0.5rem', background: '#1a1a1a', border: '1px solid #333', color: '#fff', borderRadius: '0.5rem' }}
           >
             <option value="ptt">ptt</option>
             <option value="duplex">duplex</option>
           </select>
-          <button onClick={startSession} disabled={loading} style={{ padding: '0.5rem 0.8rem' }}>Start</button>
-          <button onClick={stopSession} disabled={loading || !sessionId} style={{ padding: '0.5rem 0.8rem' }}>Stop</button>
+
+          <select
+            value={voiceGender}
+            onChange={(e) => setVoiceGender(e.target.value as 'male' | 'female')}
+            disabled={loading || isVoiceEnabled}
+            style={{ padding: '0.5rem', background: '#1a1a1a', border: '1px solid #333', color: '#fff', borderRadius: '0.5rem' }}
+          >
+            <option value="female">женский голос</option>
+            <option value="male">мужской голос</option>
+          </select>
+
+          <button onClick={toggleVoice} disabled={loading} style={{ padding: '0.5rem 0.8rem' }}>
+            {isVoiceEnabled ? 'Выключить голосовое общение' : 'Включить голосовое общение'}
+          </button>
+
           <button onClick={refresh} disabled={loading || !sessionId} style={{ padding: '0.5rem 0.8rem' }}>Refresh</button>
           <button onClick={applyGoodMetrics} disabled={loading || !sessionId} style={{ padding: '0.5rem 0.8rem' }}>Apply MVP GO metrics</button>
         </div>

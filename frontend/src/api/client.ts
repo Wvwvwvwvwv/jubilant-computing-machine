@@ -140,11 +140,12 @@ export const companionAPI = {
 
 
 export const voiceAPI = {
-  startSession: async (mode: 'ptt' | 'duplex' = 'ptt') => {
+  startSession: async (mode: 'ptt' | 'duplex' = 'ptt', voiceGender: 'male' | 'female' = 'female') => {
+    const ttsEngine = voiceGender === 'male' ? 'local_piper_male' : 'local_piper_female'
     const { data } = await api.post('/voice/session/start', {
       mode,
       stt_engine: 'local_whisper_cpp',
-      tts_engine: 'local_piper'
+      tts_engine: ttsEngine
     })
     return data
   },
