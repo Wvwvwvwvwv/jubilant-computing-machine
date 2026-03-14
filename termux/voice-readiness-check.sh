@@ -46,6 +46,25 @@ fi
 echo "[info] CORE_URL=$CORE_URL"
 echo "[info] mode=$MODE voice_gender=$VOICE_GENDER tts_engine=$TTS_ENGINE strict=$STRICT keep_session=$KEEP_SESSION"
 
+api_call() {
+  local method="$1"
+  local url="$2"
+  local body="${3:-}"
+  local tmp
+  tmp="$(mktemp)"
+
+  local code
+  if [[ -n "$body" ]]; then
+    code="$(curl -sS -o "$tmp" -w '%{http_code}' -X "$method" "$url" -H 'Content-Type: application/json' -d "$body" || true)"
+  else
+    code="$(curl -sS -o "$tmp" -w '%{http_code}' -X "$method" "$url" || true)"
+  fi
+
+  printf '%s\n' "$code"
+  cat "$tmp"
+  rm -f "$tmp"
+}
+
 echo "[step] start voice session"
 START_BODY="$(python - <<'PY' "$MODE" "$TTS_ENGINE"
 import json,sys
@@ -56,7 +75,15 @@ print(json.dumps({
 }))
 PY
 )"
-START_RESP="$(curl -fsS -X POST "$CORE_URL/api/voice/session/start" -H 'Content-Type: application/json' -d "$START_BODY")"
+START_RAW="$(api_call POST "$CORE_URL/api/voice/session/start" "$START_BODY")"
+START_CODE="$(printf '%s' "$START_RAW" | head -n1)"
+START_RESP="$(printf '%s' "$START_RAW" | tail -n +2)"
+if [[ "$START_CODE" -lt 200 || "$START_CODE" -ge 300 ]]; then
+  echo "[error] start voice session failed: HTTP $START_CODE" >&2
+  echo "[error] response: $START_RESP" >&2
+  exit 1
+fi
+
 VOICE_SESSION_ID="$(printf '%s' "$START_RESP" | python -c 'import json,sys; print(json.loads(sys.stdin.read())["voice_session_id"])' 2>/dev/null || true)"
 if [[ -z "$VOICE_SESSION_ID" ]]; then
   echo "[error] failed to parse voice_session_id from start response" >&2
@@ -78,15 +105,37 @@ print(json.dumps({
 }))
 PY
 )"
-curl -fsS -X PATCH "$CORE_URL/api/voice/session/$VOICE_SESSION_ID/metrics" -H 'Content-Type: application/json' -d "$METRICS_BODY" >/dev/null
+PATCH_RAW="$(api_call PATCH "$CORE_URL/api/voice/session/$VOICE_SESSION_ID/metrics" "$METRICS_BODY")"
+PATCH_CODE="$(printf '%s' "$PATCH_RAW" | head -n1)"
+PATCH_RESP="$(printf '%s' "$PATCH_RAW" | tail -n +2)"
+if [[ "$PATCH_CODE" -lt 200 || "$PATCH_CODE" -ge 300 ]]; then
+  echo "[warn] metrics patch failed: HTTP $PATCH_CODE" >&2
+  echo "[warn] continuing without patched metrics" >&2
+  echo "[warn] response: $PATCH_RESP" >&2
+fi
 
 echo "[step] fetch health"
-HEALTH_RESP="$(curl -fsS "$CORE_URL/api/voice/session/$VOICE_SESSION_ID/health")"
+HEALTH_RAW="$(api_call GET "$CORE_URL/api/voice/session/$VOICE_SESSION_ID/health")"
+HEALTH_CODE="$(printf '%s' "$HEALTH_RAW" | head -n1)"
+HEALTH_RESP="$(printf '%s' "$HEALTH_RAW" | tail -n +2)"
+if [[ "$HEALTH_CODE" -lt 200 || "$HEALTH_CODE" -ge 300 ]]; then
+  echo "[error] health request failed: HTTP $HEALTH_CODE" >&2
+  echo "[error] response: $HEALTH_RESP" >&2
+  exit 1
+fi
 printf '%s' "$HEALTH_RESP" | python -m json.tool
 
 echo "[step] fetch go-no-go"
-GONOGO_RESP="$(curl -fsS "$CORE_URL/api/voice/session/$VOICE_SESSION_ID/go-no-go")"
+GONOGO_RAW="$(api_call GET "$CORE_URL/api/voice/session/$VOICE_SESSION_ID/go-no-go")"
+GONOGO_CODE="$(printf '%s' "$GONOGO_RAW" | head -n1)"
+GONOGO_RESP="$(printf '%s' "$GONOGO_RAW" | tail -n +2)"
+if [[ "$GONOGO_CODE" -lt 200 || "$GONOGO_CODE" -ge 300 ]]; then
+  echo "[error] go-no-go request failed: HTTP $GONOGO_CODE" >&2
+  echo "[error] response: $GONOGO_RESP" >&2
+  exit 1
+fi
 printf '%s' "$GONOGO_RESP" | python -m json.tool
+
 DECISION="$(printf '%s' "$GONOGO_RESP" | python -c 'import json,sys; print(json.loads(sys.stdin.read()).get("decision", ""))' 2>/dev/null || true)"
 if [[ -z "$DECISION" ]]; then
   echo "[error] failed to parse decision from go-no-go response" >&2
@@ -98,7 +147,13 @@ echo "[result] decision=$DECISION"
 
 if [[ "$KEEP_SESSION" -eq 0 ]]; then
   echo "[step] stop voice session"
-  curl -fsS -X POST "$CORE_URL/api/voice/session/$VOICE_SESSION_ID/stop" >/dev/null || true
+  STOP_RAW="$(api_call POST "$CORE_URL/api/voice/session/$VOICE_SESSION_ID/stop")"
+  STOP_CODE="$(printf '%s' "$STOP_RAW" | head -n1)"
+  STOP_RESP="$(printf '%s' "$STOP_RAW" | tail -n +2)"
+  if [[ "$STOP_CODE" -lt 200 || "$STOP_CODE" -ge 300 ]]; then
+    echo "[warn] stop session failed: HTTP $STOP_CODE" >&2
+    echo "[warn] response: $STOP_RESP" >&2
+  fi
 fi
 
 if [[ "$STRICT" -eq 1 && "$DECISION" != "GO" ]]; then
