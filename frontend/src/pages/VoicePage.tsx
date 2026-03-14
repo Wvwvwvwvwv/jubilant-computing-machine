@@ -9,6 +9,15 @@ type GoNoGo = {
   metrics: Record<string, number>
 }
 
+type MicProbeResult = {
+  peakRms: number
+  baselineRms: number
+  hasSignal: boolean
+}
+
+const MIC_MIN_ABSOLUTE_RMS = 0.004
+const MIC_RELATIVE_GAIN = 1.8
+
 export default function VoicePage() {
   const [mode, setMode] = useState<'ptt' | 'duplex'>('ptt')
   const [voiceGender, setVoiceGender] = useState<'male' | 'female'>('female')
@@ -24,9 +33,9 @@ export default function VoicePage() {
   const [micSignalRms, setMicSignalRms] = useState<number>(0)
   const micStreamRef = useRef<MediaStream | null>(null)
 
-  const probeMicrophoneSignal = async (stream: MediaStream): Promise<number> => {
+  const probeMicrophoneSignal = async (stream: MediaStream): Promise<MicProbeResult> => {
     const AudioCtx = window.AudioContext || (window as any).webkitAudioContext
-    if (!AudioCtx) return 0
+    if (!AudioCtx) return { peakRms: 0, baselineRms: 0, hasSignal: false }
     const ctx = new AudioCtx()
     try {
       const source = ctx.createMediaStreamSource(stream)
@@ -37,6 +46,8 @@ export default function VoicePage() {
       const data = new Uint8Array(analyser.fftSize)
       const started = performance.now()
       let peakRms = 0
+      let baselineSum = 0
+      let baselineCount = 0
 
       while (performance.now() - started < 900) {
         analyser.getByteTimeDomainData(data)
@@ -47,9 +58,15 @@ export default function VoicePage() {
         }
         const rms = Math.sqrt(sum / data.length)
         peakRms = Math.max(peakRms, rms)
+        if (performance.now() - started < 250) {
+          baselineSum += rms
+          baselineCount += 1
+        }
         await new Promise((resolve) => setTimeout(resolve, 50))
       }
-      return peakRms
+      const baselineRms = baselineCount > 0 ? baselineSum / baselineCount : 0
+      const hasSignal = peakRms >= MIC_MIN_ABSOLUTE_RMS || (baselineRms > 0 && peakRms / baselineRms >= MIC_RELATIVE_GAIN)
+      return { peakRms, baselineRms, hasSignal }
     } finally {
       await ctx.close()
     }
@@ -89,13 +106,15 @@ export default function VoicePage() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       micStreamRef.current = stream
       const track = stream.getAudioTracks()[0]
-      const rms = await probeMicrophoneSignal(stream)
-      setMicSignalRms(rms)
-      const hasSignal = rms >= 0.01
+      const probe = await probeMicrophoneSignal(stream)
+      setMicSignalRms(probe.peakRms)
+      const hasSignal = probe.hasSignal
       setMicLabel(track?.label || 'default microphone')
       setMicStatus(hasSignal ? 'connected' : 'error')
       if (!hasSignal) {
-        setMicError('Микрофон подключен, но входной аудиосигнал почти нулевой (проверь mute/разрешения).')
+        setMicError(
+          'Микрофон подключен, но сигнал слишком тихий/плоский. Попробуйте говорить громче 1-2 сек, отключить шумоподавление или проверить mute.'
+        )
       }
       const sid = voiceSessionId || sessionId
       if (sid) {
@@ -103,7 +122,7 @@ export default function VoicePage() {
           sid,
           hasSignal,
           'browser_rms_probe',
-          `${track?.label || 'default microphone'}; peak_rms=${rms.toFixed(4)}`
+          `${track?.label || 'default microphone'}; peak_rms=${probe.peakRms.toFixed(4)}; baseline_rms=${probe.baselineRms.toFixed(4)}`
         )
       }
     } catch (e: any) {
@@ -145,7 +164,7 @@ export default function VoicePage() {
       } else {
         await syncMicVerification(
           data.voice_session_id,
-          micSignalRms >= 0.01,
+          micSignalRms >= MIC_MIN_ABSOLUTE_RMS,
           'ui_session_start_sync',
           `${micLabel || 'connected before session start'}; peak_rms=${micSignalRms.toFixed(4)}`
         )
@@ -191,7 +210,7 @@ export default function VoicePage() {
       if (micStatus === 'connected') {
         await syncMicVerification(
           sessionId,
-          micSignalRms >= 0.01,
+          micSignalRms >= MIC_MIN_ABSOLUTE_RMS,
           'ui_refresh_sync',
           `${micLabel || 'connected microphone'}; peak_rms=${micSignalRms.toFixed(4)}`
         )
