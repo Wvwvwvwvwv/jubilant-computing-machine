@@ -1,5 +1,5 @@
 import { Outlet, NavLink } from 'react-router-dom'
-import { MessageSquare, Brain, Terminal, ListChecks } from 'lucide-react'
+import { MessageSquare, Brain, Terminal, ListChecks, SlidersHorizontal } from 'lucide-react'
 
 export default function Layout() {
   return (
@@ -93,6 +93,23 @@ export default function Layout() {
         >
           <ListChecks size={24} />
           <span style={{ marginTop: '0.25rem' }}>Задачи</span>
+        </NavLink>
+
+        <NavLink
+          to="/companion"
+          style={({ isActive }) => ({
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            padding: '0.75rem',
+            color: isActive ? '#3b82f6' : '#888',
+            textDecoration: 'none',
+            fontSize: '0.875rem'
+          })}
+        >
+          <SlidersHorizontal size={24} />
+          <span style={{ marginTop: '0.25rem' }}>Companion</span>
         </NavLink>
       </nav>
     </div>

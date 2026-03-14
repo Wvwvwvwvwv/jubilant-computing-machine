@@ -105,4 +105,27 @@ export const tasksAPI = {
   }
 }
 
+
+export const companionAPI = {
+  getSession: async () => {
+    const { data } = await api.get('/companion/session')
+    return data
+  },
+
+  patchSession: async (patch: any) => {
+    const { data } = await api.patch('/companion/session', patch)
+    return data
+  },
+
+  getRelationshipProfile: async () => {
+    const { data } = await api.get('/companion/relationship-profile')
+    return data
+  },
+
+  patchRelationshipProfile: async (patch: any) => {
+    const { data } = await api.patch('/companion/relationship-profile', patch)
+    return data
+  }
+}
+
 export default api
