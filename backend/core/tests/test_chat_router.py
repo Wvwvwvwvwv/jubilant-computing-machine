@@ -1,10 +1,13 @@
-from types import SimpleNamespace
-
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.core.routers import chat as chat_router
-from backend.core.routers.chat import ChatMessage, build_companion_behavior_message, serialize_messages
+from backend.core.routers.chat import (
+    ChatMessage,
+    build_companion_behavior_message,
+    build_relationship_memory_message,
+    serialize_messages,
+)
 from backend.core.services.companion_state import CompanionState
 
 
@@ -17,6 +20,14 @@ class FakeMemoryEngine:
 
     async def record_outcome(self, interaction_id: str, helpful: bool):
         return None
+
+
+class FakeCompanionMemory:
+    def list_facts(self, query: str = "", limit: int = 20):
+        return [
+            type("Fact", (), {"fact_id": "rf_1", "fact": "Пользователь любит сначала риски"})(),
+            type("Fact", (), {"fact_id": "rf_2", "fact": "Предпочитает краткие выводы"})(),
+        ]
 
 
 def test_serialize_messages_with_pydantic_v2_models():
@@ -50,12 +61,24 @@ def test_build_companion_behavior_message_reflects_modes():
     assert "контрпозицию" in wild_msg.content
 
 
-def test_chat_endpoint_writes_trace_and_injects_policy(monkeypatch):
+def test_build_relationship_memory_message_contains_fact_ids():
+    msg = build_relationship_memory_message(
+        [
+            {"fact_id": "rf_1", "fact": "A"},
+            {"fact_id": "rf_2", "fact": "B"},
+        ]
+    )
+    assert "[Fact rf_1]" in msg.content
+    assert "[Fact rf_2]" in msg.content
+
+
+def test_chat_endpoint_writes_trace_and_injects_policy_and_relationship(monkeypatch):
     app = FastAPI()
     app.include_router(chat_router.router, prefix="/api/chat")
     app.state.memory_engine = FakeMemoryEngine()
     app.state.companion_state = CompanionState()
     app.state.companion_state.update_session(reasoning_mode="wild", challenge_mode="balanced")
+    app.state.companion_memory = FakeCompanionMemory()
 
     captured = {}
 
@@ -84,9 +107,16 @@ def test_chat_endpoint_writes_trace_and_injects_policy(monkeypatch):
     assert first_msg["role"] == "system"
     assert "Политика поведения companion" in first_msg["content"]
 
+    # relationship memory message should be injected next
+    second_msg = captured["messages"][1]
+    assert second_msg["role"] == "system"
+    assert "Память отношений" in second_msg["content"]
+    assert "rf_1" in second_msg["content"]
+
     trace = app.state.companion_state.get_last_trace()
     assert trace is not None
     assert trace.reasoning_mode == "wild"
     assert trace.challenge_mode == "balanced"
     assert "insufficient_data" in trace.uncertainty_markers
     assert trace.counter_position_used is True
+    assert trace.relationship_used == ["rf_1", "rf_2"]

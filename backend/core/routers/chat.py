@@ -4,6 +4,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from backend.core.services.companion_memory import CompanionMemory
 from backend.core.services.companion_state import CompanionState
 from backend.core.services.kobold_client import KoboldClient
 from backend.core.services.memory_engine import MemoryEngine
@@ -70,6 +71,17 @@ def build_companion_behavior_message(session) -> ChatMessage:
     )
 
 
+def build_relationship_memory_message(facts: list[dict]) -> ChatMessage:
+    lines = [f"[Fact {x['fact_id']}]: {x['fact']}" for x in facts]
+    return ChatMessage(
+        role="system",
+        content=(
+            "Память отношений (используй как персональные предпочтения пользователя, если релевантно):\n"
+            + "\n".join(lines)
+        ),
+    )
+
+
 def infer_uncertainty_markers(text: str) -> list[str]:
     lowered = (text or "").lower()
     markers = []
@@ -89,16 +101,26 @@ async def chat(request: ChatRequest, req: Request):
 
     memory_engine: MemoryEngine = req.app.state.memory_engine
     companion_state: CompanionState | None = getattr(req.app.state, "companion_state", None)
+    companion_memory: CompanionMemory | None = getattr(req.app.state, "companion_memory", None)
 
     context_items = 0
     memory_context = []
     query_text = request.messages[-1].content
     working_messages = list(request.messages)
+    used_relationship_ids: list[str] = []
 
     # Companion behavior policy injection (mode/challenge)
     if companion_state is not None:
         behavior_msg = build_companion_behavior_message(companion_state.get_session())
         working_messages.insert(0, behavior_msg)
+
+    # Relationship memory injection (top active facts)
+    if companion_memory is not None:
+        relation_facts = companion_memory.list_facts(limit=3)
+        if relation_facts:
+            relation_payload = [{"fact_id": x.fact_id, "fact": x.fact} for x in relation_facts]
+            used_relationship_ids = [x["fact_id"] for x in relation_payload]
+            working_messages.insert(1 if companion_state is not None else 0, build_relationship_memory_message(relation_payload))
 
     # Получение релевантного контекста из памяти
     if request.use_memory:
@@ -137,7 +159,7 @@ async def chat(request: ChatRequest, req: Request):
             sess = companion_state.get_session()
             companion_state.set_last_trace(
                 response_id=f"resp_{uuid.uuid4().hex[:12]}",
-                relationship_used=[],
+                relationship_used=used_relationship_ids,
                 uncertainty_markers=infer_uncertainty_markers(response),
                 counter_position_used=(sess.challenge_mode != "off"),
                 confidence=0.72 if sess.reasoning_mode == "stable" else 0.64,

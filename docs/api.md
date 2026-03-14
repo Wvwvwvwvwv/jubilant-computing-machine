@@ -397,6 +397,7 @@ Base URL: `http://localhost:8000`
 Последний explainability trace по ответу ассистента. До появления ответа может вернуть `null`.
 
 Примечание: trace обновляется после успешного `POST /api/chat/` и отражает активные `reasoning_mode/challenge_mode`.
+Примечание: `relationship_used` в trace заполняется ID relationship-фактов, реально подмешанных в chat prompt.
 
 ### GET /api/companion/relationship-profile
 
