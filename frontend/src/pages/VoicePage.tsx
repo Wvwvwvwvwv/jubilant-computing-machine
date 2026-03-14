@@ -149,7 +149,19 @@ export default function VoicePage() {
 
       <section style={{ border: '1px solid #333', borderRadius: '0.75rem', padding: '1rem', marginBottom: '1rem' }}>
         <h3 style={{ marginTop: 0 }}>Health</h3>
-        {!health ? <div style={{ color: '#aaa' }}>Нет данных.</div> : <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(health, null, 2)}</pre>}
+        {!health ? (
+          <div style={{ color: '#aaa' }}>Нет данных.</div>
+        ) : (
+          <>
+            <div style={{ display: 'grid', gap: '0.35rem', marginBottom: '0.75rem', fontSize: '0.92rem' }}>
+              <div><strong>Active mode:</strong> {health.mode}</div>
+              <div><strong>STT engine:</strong> {health.stt_engine}</div>
+              <div><strong>TTS engine:</strong> {health.tts_engine}</div>
+              <div><strong>Status:</strong> {health.status}</div>
+            </div>
+            <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(health, null, 2)}</pre>
+          </>
+        )}
       </section>
 
       <section style={{ border: '1px solid #333', borderRadius: '0.75rem', padding: '1rem' }}>
