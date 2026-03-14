@@ -5,6 +5,7 @@ import MemoryPage from './pages/MemoryPage'
 import SandboxPage from './pages/SandboxPage'
 import TasksPage from './pages/TasksPage'
 import CompanionPage from './pages/CompanionPage'
+import VoicePage from './pages/VoicePage'
 
 function App() {
   return (
@@ -17,6 +18,7 @@ function App() {
           <Route path="sandbox" element={<SandboxPage />} />
           <Route path="tasks" element={<TasksPage />} />
           <Route path="companion" element={<CompanionPage />} />
+          <Route path="voice" element={<VoicePage />} />
         </Route>
       </Routes>
     </BrowserRouter>

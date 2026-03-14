@@ -138,4 +138,36 @@ export const companionAPI = {
   }
 }
 
+
+export const voiceAPI = {
+  startSession: async (mode: 'ptt' | 'duplex' = 'ptt') => {
+    const { data } = await api.post('/voice/session/start', {
+      mode,
+      stt_engine: 'local_whisper_cpp',
+      tts_engine: 'local_piper'
+    })
+    return data
+  },
+
+  stopSession: async (voiceSessionId: string) => {
+    const { data } = await api.post(`/voice/session/${voiceSessionId}/stop`)
+    return data
+  },
+
+  health: async (voiceSessionId: string) => {
+    const { data } = await api.get(`/voice/session/${voiceSessionId}/health`)
+    return data
+  },
+
+  updateMetrics: async (voiceSessionId: string, payload: any) => {
+    const { data } = await api.patch(`/voice/session/${voiceSessionId}/metrics`, payload)
+    return data
+  },
+
+  goNoGo: async (voiceSessionId: string) => {
+    const { data } = await api.get(`/voice/session/${voiceSessionId}/go-no-go`)
+    return data
+  }
+}
+
 export default api
