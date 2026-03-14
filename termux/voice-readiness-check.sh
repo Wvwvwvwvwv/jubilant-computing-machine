@@ -57,11 +57,12 @@ print(json.dumps({
 PY
 )"
 START_RESP="$(curl -fsS -X POST "$CORE_URL/api/voice/session/start" -H 'Content-Type: application/json' -d "$START_BODY")"
-VOICE_SESSION_ID="$(printf '%s' "$START_RESP" | python - <<'PY'
-import json,sys
-print(json.load(sys.stdin)['voice_session_id'])
-PY
-)"
+VOICE_SESSION_ID="$(printf '%s' "$START_RESP" | python -c 'import json,sys; print(json.loads(sys.stdin.read())["voice_session_id"])' 2>/dev/null || true)"
+if [[ -z "$VOICE_SESSION_ID" ]]; then
+  echo "[error] failed to parse voice_session_id from start response" >&2
+  echo "[error] raw start response: $START_RESP" >&2
+  exit 1
+fi
 
 echo "[info] voice_session_id=$VOICE_SESSION_ID"
 
@@ -86,11 +87,12 @@ printf '%s' "$HEALTH_RESP" | python -m json.tool
 echo "[step] fetch go-no-go"
 GONOGO_RESP="$(curl -fsS "$CORE_URL/api/voice/session/$VOICE_SESSION_ID/go-no-go")"
 printf '%s' "$GONOGO_RESP" | python -m json.tool
-DECISION="$(printf '%s' "$GONOGO_RESP" | python - <<'PY'
-import json,sys
-print(json.load(sys.stdin).get('decision',''))
-PY
-)"
+DECISION="$(printf '%s' "$GONOGO_RESP" | python -c 'import json,sys; print(json.loads(sys.stdin.read()).get("decision", ""))' 2>/dev/null || true)"
+if [[ -z "$DECISION" ]]; then
+  echo "[error] failed to parse decision from go-no-go response" >&2
+  echo "[error] raw go-no-go response: $GONOGO_RESP" >&2
+  exit 1
+fi
 
 echo "[result] decision=$DECISION"
 
