@@ -165,6 +165,15 @@ export const voiceAPI = {
     return data
   },
 
+  verifyMicrophone: async (voiceSessionId: string, verified: boolean, source: string, detail: string = '') => {
+    const { data } = await api.post(`/voice/session/${voiceSessionId}/microphone/verify`, {
+      verified,
+      source,
+      detail
+    })
+    return data
+  },
+
   goNoGo: async (voiceSessionId: string) => {
     const { data } = await api.get(`/voice/session/${voiceSessionId}/go-no-go`)
     return data

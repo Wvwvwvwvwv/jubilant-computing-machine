@@ -15,6 +15,9 @@ STRICT=0
 KEEP_SESSION=0
 JSON_OUT=""
 REQUIRE_MIC=0
+MIC_CHECK_OK=0
+MIC_CHECK_SOURCE="unverified"
+MIC_CHECK_DETAIL=""
 
 # Defaults correspond to MVP GO thresholds.
 LATENCY_P95_MS="${LATENCY_P95_MS:-1800}"
@@ -72,7 +75,12 @@ check_microphone_physical() {
       sleep 3
       termux-microphone-record -q >/dev/null 2>&1 || true
       if [[ -s "$rec_file" ]]; then
-        echo "[info] microphone capture check: OK (termux-microphone-record, bytes=$(wc -c < "$rec_file"))"
+        local bytes
+        bytes="$(wc -c < "$rec_file")"
+        echo "[info] microphone capture check: OK (termux-microphone-record, bytes=$bytes)"
+        MIC_CHECK_OK=1
+        MIC_CHECK_SOURCE="termux_microphone_record"
+        MIC_CHECK_DETAIL="bytes=$bytes"
         rm -f "$rec_file"
         return 0
       fi
@@ -91,6 +99,9 @@ check_microphone_physical() {
     cards="$(arecord -l 2>/dev/null || true)"
     if printf '%s' "$cards" | grep -qi 'card'; then
       echo "[info] microphone capture devices detected via arecord"
+      MIC_CHECK_OK=1
+      MIC_CHECK_SOURCE="arecord_list"
+      MIC_CHECK_DETAIL="capture cards detected"
       return 0
     fi
     echo "[warn] arecord found but no capture cards detected" >&2
@@ -100,6 +111,10 @@ check_microphone_physical() {
     echo "[error] physical microphone check failed and --require-mic is set" >&2
     exit 1
   fi
+
+  MIC_CHECK_OK=0
+  MIC_CHECK_SOURCE="unverified"
+  MIC_CHECK_DETAIL="no physical microphone verification path succeeded"
 
   echo "[warn] physical microphone could not be verified in this environment; continuing" >&2
 }
@@ -152,6 +167,25 @@ if [[ -z "$VOICE_SESSION_ID" ]]; then
 fi
 
 echo "[info] voice_session_id=$VOICE_SESSION_ID"
+
+echo "[step] report microphone verification to backend"
+MIC_VERIFY_BODY="$(python - <<'PY' "$MIC_CHECK_OK" "$MIC_CHECK_SOURCE" "$MIC_CHECK_DETAIL"
+import json,sys
+ok = bool(int(sys.argv[1]))
+source = sys.argv[2]
+detail = sys.argv[3]
+print(json.dumps({"verified": ok, "source": source, "detail": detail}))
+PY
+)"
+MIC_VERIFY_RAW="$(api_call POST "$CORE_URL/api/voice/session/$VOICE_SESSION_ID/microphone/verify" "$MIC_VERIFY_BODY")"
+MIC_VERIFY_CODE="$(printf '%s' "$MIC_VERIFY_RAW" | head -n1)"
+MIC_VERIFY_RESP="$(printf '%s' "$MIC_VERIFY_RAW" | tail -n +2)"
+if [[ "$MIC_VERIFY_CODE" -lt 200 || "$MIC_VERIFY_CODE" -ge 300 ]]; then
+  echo "[warn] microphone verify API failed: HTTP $MIC_VERIFY_CODE" >&2
+  echo "[warn] response: $MIC_VERIFY_RESP" >&2
+else
+  echo "[info] microphone verify API applied: verified=$MIC_CHECK_OK source=$MIC_CHECK_SOURCE"
+fi
 
 echo "[step] patch metrics"
 METRICS_BODY_FULL="$(python - <<'PY' "$LATENCY_P95_MS" "$CRASH_FREE_RATE" "$AUDIO_LOSS_PERCENT" "$APPROVAL_BYPASS_INCIDENTS" "$USER_SCORE"

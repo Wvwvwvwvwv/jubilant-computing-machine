@@ -31,7 +31,20 @@ def test_voice_session_start_health_stop_flow():
     assert hdata["mode"] == "ptt"
     assert hdata["stt_engine"] == "local_whisper_cpp"
     assert hdata["tts_engine"] == "local_piper"
+    assert hdata["input_device"] == "not_verified"
+    assert hdata["microphone_verified"] is False
     assert hdata["latency_p95_ms"] == 1700
+
+    verified = client.post(
+        f"/api/voice/session/{voice_session_id}/microphone/verify",
+        json={"verified": True, "source": "test", "detail": "fake mic"},
+    )
+    assert verified.status_code == 200
+
+    health_verified = client.get(f"/api/voice/session/{voice_session_id}/health")
+    assert health_verified.status_code == 200
+    assert health_verified.json()["input_device"] == "ok"
+    assert health_verified.json()["microphone_verified"] is True
 
     stopped = client.post(f"/api/voice/session/{voice_session_id}/stop")
     assert stopped.status_code == 200
@@ -55,7 +68,7 @@ def test_voice_session_missing_returns_404():
     assert response.status_code == 404
 
 
-def test_voice_go_no_go_default_is_go_and_can_turn_no_go():
+def test_voice_go_no_go_requires_verified_microphone_and_can_turn_no_go():
     client = make_client()
 
     started = client.post("/api/voice/session/start", json={"mode": "ptt"})
@@ -63,7 +76,18 @@ def test_voice_go_no_go_default_is_go_and_can_turn_no_go():
 
     go = client.get(f"/api/voice/session/{sid}/go-no-go")
     assert go.status_code == 200
-    assert go.json()["decision"] == "GO"
+    assert go.json()["decision"] == "NO_GO"
+    assert "microphone_verified_true" in go.json()["failed_checks"]
+
+    mic_ok = client.post(
+        f"/api/voice/session/{sid}/microphone/verify",
+        json={"verified": True, "source": "test", "detail": "mic ok"},
+    )
+    assert mic_ok.status_code == 200
+
+    go_after_verify = client.get(f"/api/voice/session/{sid}/go-no-go")
+    assert go_after_verify.status_code == 200
+    assert go_after_verify.json()["decision"] == "GO"
 
     patched = client.patch(
         f"/api/voice/session/{sid}/metrics",

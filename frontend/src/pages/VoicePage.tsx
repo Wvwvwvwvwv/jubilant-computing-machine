@@ -45,9 +45,15 @@ export default function VoicePage() {
       const track = stream.getAudioTracks()[0]
       setMicLabel(track?.label || 'default microphone')
       setMicStatus('connected')
+      if (sessionId) {
+        await voiceAPI.verifyMicrophone(sessionId, true, 'browser_getUserMedia', track?.label || 'default microphone')
+      }
     } catch (e: any) {
       setMicStatus('error')
       setMicError(e?.message || 'Не удалось получить доступ к микрофону')
+      if (sessionId) {
+        await voiceAPI.verifyMicrophone(sessionId, false, 'browser_getUserMedia', e?.message || 'mic access failed')
+      }
     }
   }
 
@@ -59,6 +65,9 @@ export default function VoicePage() {
     setMicStatus('idle')
     setMicLabel('')
     setMicError(null)
+    if (sessionId) {
+      void voiceAPI.verifyMicrophone(sessionId, false, 'browser_disconnect', 'microphone disconnected by user')
+    }
   }
 
   const startSession = async () => {

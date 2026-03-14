@@ -28,6 +28,9 @@ class VoiceSessionHealthResponse(BaseModel):
     tts: str
     latency_p95_ms: int | None = None
     xruns_per_min: int | None = None
+    microphone_verified: bool = False
+    microphone_source: str | None = None
+    microphone_detail: str | None = None
 
 
 class VoiceMetricsUpdateRequest(BaseModel):
@@ -37,6 +40,12 @@ class VoiceMetricsUpdateRequest(BaseModel):
     audio_loss_percent: float | None = Field(default=None, ge=0.0, le=100.0)
     approval_bypass_incidents: int | None = Field(default=None, ge=0, le=100000)
     user_score: float | None = Field(default=None, ge=0.0, le=5.0)
+
+
+class VoiceMicrophoneVerifyRequest(BaseModel):
+    verified: bool
+    source: str = Field("manual", min_length=2, max_length=100)
+    detail: str = Field("", max_length=500)
 
 
 class VoiceGoNoGoResponse(BaseModel):
@@ -93,6 +102,22 @@ async def update_voice_metrics(voice_session_id: str, body: VoiceMetricsUpdateRe
     try:
         payload = _model_dump_compat(body)
         sess = state.update_metrics(voice_session_id=voice_session_id, **payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    return VoiceSessionResponse(voice_session_id=sess.voice_session_id, mode=sess.mode, status=sess.status)
+
+
+@router.post("/session/{voice_session_id}/microphone/verify", response_model=VoiceSessionResponse)
+async def verify_microphone(voice_session_id: str, body: VoiceMicrophoneVerifyRequest, req: Request):
+    state: VoiceState = req.app.state.voice_state
+    try:
+        sess = state.verify_microphone(
+            voice_session_id=voice_session_id,
+            verified=body.verified,
+            source=body.source,
+            detail=body.detail,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 

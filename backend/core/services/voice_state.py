@@ -22,6 +22,9 @@ class VoiceSession:
     audio_loss_percent: float = 0.0
     approval_bypass_incidents: int = 0
     user_score: float = 4.5
+    microphone_verified: bool = False
+    microphone_source: str = "unverified"
+    microphone_detail: str = ""
 
 
 class VoiceState:
@@ -89,6 +92,20 @@ class VoiceState:
         sess.updated_at = time.time()
         return sess
 
+    def verify_microphone(
+        self,
+        voice_session_id: str,
+        verified: bool,
+        source: str = "manual",
+        detail: str = "",
+    ) -> VoiceSession:
+        sess = self.get_session(voice_session_id)
+        sess.microphone_verified = bool(verified)
+        sess.microphone_source = (source or "manual").strip()[:100]
+        sess.microphone_detail = (detail or "").strip()[:500]
+        sess.updated_at = time.time()
+        return sess
+
     def health(self, voice_session_id: str) -> dict:
         sess = self.get_session(voice_session_id)
         if sess.status == "stopped":
@@ -102,6 +119,9 @@ class VoiceState:
                 "tts": "stopped",
                 "latency_p95_ms": None,
                 "xruns_per_min": None,
+                "microphone_verified": False,
+                "microphone_source": sess.microphone_source,
+                "microphone_detail": sess.microphone_detail,
             }
 
         return {
@@ -109,17 +129,21 @@ class VoiceState:
             "mode": sess.mode,
             "stt_engine": sess.stt_engine,
             "tts_engine": sess.tts_engine,
-            "input_device": "ok",
-            "stt": "ok",
+            "input_device": "ok" if sess.microphone_verified else "not_verified",
+            "stt": "ok" if sess.microphone_verified else "degraded",
             "tts": "ok",
             "latency_p95_ms": sess.latency_p95_ms,
             "xruns_per_min": sess.xruns_per_min,
+            "microphone_verified": sess.microphone_verified,
+            "microphone_source": sess.microphone_source,
+            "microphone_detail": sess.microphone_detail,
         }
 
     def go_no_go(self, voice_session_id: str) -> dict:
         sess = self.get_session(voice_session_id)
 
         checks: dict[str, bool] = {
+            "microphone_verified_true": sess.microphone_verified,
             "latency_p95_ms_le_2500": sess.latency_p95_ms is not None and sess.latency_p95_ms <= 2500,
             "crash_free_rate_ge_0_99": sess.crash_free_rate >= 0.99,
             "audio_loss_percent_le_2": sess.audio_loss_percent <= 2.0,
@@ -141,5 +165,7 @@ class VoiceState:
                 "audio_loss_percent": sess.audio_loss_percent,
                 "approval_bypass_incidents": sess.approval_bypass_incidents,
                 "user_score": sess.user_score,
+                "microphone_verified": sess.microphone_verified,
+                "microphone_source": sess.microphone_source,
             },
         }

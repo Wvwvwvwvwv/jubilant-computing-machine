@@ -495,14 +495,35 @@ Base URL: `http://localhost:8000`
 Health-статус сессии (для MVP: synthetic health snapshot).
 
 Возвращает также активную voice-конфигурацию: `mode`, `stt_engine`, `tts_engine`.
+Теперь health включает поля проверки микрофона:
+- `microphone_verified` (`true|false`)
+- `microphone_source` (источник проверки)
+- `microphone_detail` (диагностическая строка)
+
+Если микрофон не подтвержден, `input_device=not_verified` и `stt=degraded`.
 
 ### PATCH /api/voice/session/{voice_session_id}/metrics
 
 Обновить наблюдаемые voice-метрики для оценки readiness (`latency_p95_ms`, `crash_free_rate`, `audio_loss_percent`, `approval_bypass_incidents`, `user_score`).
 
+### POST /api/voice/session/{voice_session_id}/microphone/verify
+
+Записать результат проверки физического микрофона для текущей voice-сессии.
+
+Пример:
+```json
+{
+  "verified": true,
+  "source": "termux_microphone_record",
+  "detail": "bytes=16384"
+}
+```
+
 ### GET /api/voice/session/{voice_session_id}/go-no-go
 
 Вернуть решение `GO|NO_GO` по критериям rollout и список проваленных checks.
+
+Важно: в checks добавлен `microphone_verified_true`; без подтверждения микрофона решение будет `NO_GO`.
 
 ## Embeddings Service (Port 8001)
 
