@@ -21,7 +21,39 @@ export default function VoicePage() {
   const [micStatus, setMicStatus] = useState<'idle' | 'connected' | 'error'>('idle')
   const [micError, setMicError] = useState<string | null>(null)
   const [micLabel, setMicLabel] = useState<string>('')
+  const [micSignalRms, setMicSignalRms] = useState<number>(0)
   const micStreamRef = useRef<MediaStream | null>(null)
+
+  const probeMicrophoneSignal = async (stream: MediaStream): Promise<number> => {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext
+    if (!AudioCtx) return 0
+    const ctx = new AudioCtx()
+    try {
+      const source = ctx.createMediaStreamSource(stream)
+      const analyser = ctx.createAnalyser()
+      analyser.fftSize = 2048
+      source.connect(analyser)
+
+      const data = new Uint8Array(analyser.fftSize)
+      const started = performance.now()
+      let peakRms = 0
+
+      while (performance.now() - started < 900) {
+        analyser.getByteTimeDomainData(data)
+        let sum = 0
+        for (let i = 0; i < data.length; i += 1) {
+          const normalized = (data[i] - 128) / 128
+          sum += normalized * normalized
+        }
+        const rms = Math.sqrt(sum / data.length)
+        peakRms = Math.max(peakRms, rms)
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+      return peakRms
+    } finally {
+      await ctx.close()
+    }
+  }
 
   const isVoiceEnabled = Boolean(sessionId)
 
@@ -57,14 +89,26 @@ export default function VoicePage() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       micStreamRef.current = stream
       const track = stream.getAudioTracks()[0]
+      const rms = await probeMicrophoneSignal(stream)
+      setMicSignalRms(rms)
+      const hasSignal = rms >= 0.01
       setMicLabel(track?.label || 'default microphone')
-      setMicStatus('connected')
+      setMicStatus(hasSignal ? 'connected' : 'error')
+      if (!hasSignal) {
+        setMicError('Микрофон подключен, но входной аудиосигнал почти нулевой (проверь mute/разрешения).')
+      }
       const sid = voiceSessionId || sessionId
       if (sid) {
-        await syncMicVerification(sid, true, 'browser_getUserMedia', track?.label || 'default microphone')
+        await syncMicVerification(
+          sid,
+          hasSignal,
+          'browser_rms_probe',
+          `${track?.label || 'default microphone'}; peak_rms=${rms.toFixed(4)}`
+        )
       }
     } catch (e: any) {
       setMicStatus('error')
+      setMicSignalRms(0)
       setMicError(e?.message || 'Не удалось получить доступ к микрофону')
       const sid = voiceSessionId || sessionId
       if (sid) {
@@ -80,6 +124,7 @@ export default function VoicePage() {
     }
     setMicStatus('idle')
     setMicLabel('')
+    setMicSignalRms(0)
     setMicError(null)
     const sid = voiceSessionId || sessionId
     if (sid) {
@@ -98,7 +143,12 @@ export default function VoicePage() {
       if (micStatus !== 'connected') {
         await connectMic(data.voice_session_id)
       } else {
-        await syncMicVerification(data.voice_session_id, true, 'ui_session_start_sync', micLabel || 'connected before session start')
+        await syncMicVerification(
+          data.voice_session_id,
+          micSignalRms >= 0.01,
+          'ui_session_start_sync',
+          `${micLabel || 'connected before session start'}; peak_rms=${micSignalRms.toFixed(4)}`
+        )
       }
     } catch (e: any) {
       setError(e?.response?.data?.detail || e?.message || 'Не удалось стартовать voice session')
@@ -139,7 +189,12 @@ export default function VoicePage() {
       setError(null)
       // Re-sync mic state before health/go-no-go in case browser verify event was missed.
       if (micStatus === 'connected') {
-        await syncMicVerification(sessionId, true, 'ui_refresh_sync', micLabel || 'connected microphone')
+        await syncMicVerification(
+          sessionId,
+          micSignalRms >= 0.01,
+          'ui_refresh_sync',
+          `${micLabel || 'connected microphone'}; peak_rms=${micSignalRms.toFixed(4)}`
+        )
       }
       const [h, g] = await Promise.all([
         voiceAPI.health(sessionId),
@@ -233,6 +288,7 @@ export default function VoicePage() {
           </strong>
         </div>
         {micLabel && <div style={{ marginBottom: '0.5rem' }}>Device: {micLabel}</div>}
+        <div style={{ marginBottom: '0.5rem' }}>Signal peak RMS: {micSignalRms.toFixed(4)}</div>
         {micError && <div style={{ marginBottom: '0.5rem', color: '#fca5a5' }}>{micError}</div>}
         <div style={{ display: 'flex', gap: '0.5rem' }}>
           <button onClick={() => void connectMic()} disabled={loading} style={{ padding: '0.5rem 0.8rem' }}>Подключить микрофон</button>
