@@ -6,12 +6,14 @@ set -euo pipefail
 #   bash termux/voice-readiness-check.sh
 #   MODE=duplex VOICE_GENDER=male bash termux/voice-readiness-check.sh --strict
 #   bash termux/voice-readiness-check.sh --keep-session
+#   bash termux/voice-readiness-check.sh --json-out logs/voice-readiness.json
 
 CORE_URL="${CORE_URL:-http://127.0.0.1:8000}"
 MODE="${MODE:-ptt}"               # ptt | duplex
 VOICE_GENDER="${VOICE_GENDER:-female}"  # female | male
 STRICT=0
 KEEP_SESSION=0
+JSON_OUT=""
 
 # Defaults correspond to MVP GO thresholds.
 LATENCY_P95_MS="${LATENCY_P95_MS:-1800}"
@@ -30,6 +32,10 @@ while [[ $# -gt 0 ]]; do
       KEEP_SESSION=1
       shift
       ;;
+    --json-out)
+      JSON_OUT="$2"
+      shift 2
+      ;;
     *)
       echo "Unknown arg: $1" >&2
       exit 2
@@ -45,6 +51,9 @@ fi
 
 echo "[info] CORE_URL=$CORE_URL"
 echo "[info] mode=$MODE voice_gender=$VOICE_GENDER tts_engine=$TTS_ENGINE strict=$STRICT keep_session=$KEEP_SESSION"
+if [[ -n "$JSON_OUT" ]]; then
+  echo "[info] json_out=$JSON_OUT"
+fi
 
 api_call() {
   local method="$1"
@@ -171,6 +180,25 @@ if [[ -z "$DECISION" ]]; then
 fi
 
 echo "[result] decision=$DECISION"
+
+if [[ -n "$JSON_OUT" ]]; then
+  mkdir -p "$(dirname "$JSON_OUT")"
+  python - <<'PY' "$JSON_OUT" "$VOICE_SESSION_ID" "$DECISION" "$MODE" "$VOICE_GENDER" "$HEALTH_RESP" "$GONOGO_RESP"
+import json,sys
+out_path=sys.argv[1]
+payload={
+  "voice_session_id": sys.argv[2],
+  "decision": sys.argv[3],
+  "mode": sys.argv[4],
+  "voice_gender": sys.argv[5],
+  "health": json.loads(sys.argv[6]),
+  "go_no_go": json.loads(sys.argv[7]),
+}
+with open(out_path, 'w', encoding='utf-8') as f:
+    json.dump(payload, f, ensure_ascii=False, indent=2)
+print(f"[info] wrote JSON report to {out_path}")
+PY
+fi
 
 if [[ "$KEEP_SESSION" -eq 0 ]]; then
   echo "[step] stop voice session"

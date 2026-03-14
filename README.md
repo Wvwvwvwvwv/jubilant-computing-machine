@@ -56,6 +56,9 @@ bash termux/voice-readiness-check.sh
 
 # Строгий режим: завершится с code=1, если решение не GO
 MODE=duplex VOICE_GENDER=male bash termux/voice-readiness-check.sh --strict
+
+# сохранить JSON-отчёт прогона
+bash termux/voice-readiness-check.sh --json-out logs/voice-readiness.json
 ```
 
 Если видите "Ошибка соединения с сервером", запустите диагностику:
