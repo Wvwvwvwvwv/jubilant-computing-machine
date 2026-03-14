@@ -8,6 +8,7 @@ from backend.core.routers import books, chat, companion, memory, sandbox, tasks
 from backend.core.services.memory_engine import MemoryEngine
 from backend.core.services.task_runner import TaskRunner
 from backend.core.services.companion_state import CompanionState
+from backend.core.services.companion_memory import CompanionMemory
 
 
 @asynccontextmanager
@@ -17,6 +18,7 @@ async def lifespan(app: FastAPI):
     app.state.task_runner = TaskRunner()
     app.state.task_runner.load_state()
     app.state.companion_state = CompanionState()
+    app.state.companion_memory = CompanionMemory()
     await app.state.memory_engine.initialize()
     yield
     # Shutdown

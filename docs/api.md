@@ -396,6 +396,44 @@ Base URL: `http://localhost:8000`
 
 Последний explainability trace по ответу ассистента. До появления ответа может вернуть `null`.
 
+### GET /api/companion/relationship-profile
+
+Получить профиль relationship memory (стиль, дебат-предпочтения, инициативность).
+
+### PATCH /api/companion/relationship-profile
+
+Частичное обновление relationship profile.
+
+Пример:
+```json
+{
+  "style": {"verbosity": "high"},
+  "debate_preferences": {"strictness": "strict"}
+}
+```
+
+### POST /api/companion/relationship-facts
+
+Добавить relationship-факт.
+
+Пример:
+```json
+{
+  "fact": "Пользователь предпочитает сначала риски",
+  "source": {"type": "chat_message", "ref_id": "msg_1"},
+  "confidence": 0.8,
+  "ttl_days": 90
+}
+```
+
+### GET /api/companion/relationship-facts?query=...&limit=...
+
+Поиск активных relationship-фактов.
+
+### POST /api/companion/relationship-facts/{fact_id}/invalidate
+
+Ручная инвалидизация relationship-факта (status -> `invalidated`).
+
 ## Embeddings Service (Port 8001)
 
 Base URL: `http://localhost:8001`
