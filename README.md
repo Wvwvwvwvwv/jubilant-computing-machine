@@ -61,6 +61,16 @@ cd ~/roampal-android
 bash termux/verify-repo-integrity.sh ~/roampal-android work
 ```
 
+### Очистка памяти от технических/тестовых записей
+```bash
+cd ~/roampal-android
+# сначала dry-run (показать кандидатов)
+bash termux/cleanup-memory-noise.sh
+
+# затем применить удаление
+bash termux/cleanup-memory-noise.sh --apply
+```
+
 ### 5. Автоматическое развертывание (рекомендуется)
 ```bash
 curl -sSL https://raw.githubusercontent.com/Wvwvwvwvwv/jubilant-computing-machine/main/termux/deploy.sh | bash -s -- work
