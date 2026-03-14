@@ -80,6 +80,7 @@ bash termux/deploy.sh work
 - ✅ Песочница для выполнения кода
 - ✅ Векторный поиск и эмбеддинги
 - ✅ MCP интеграция
+- ✅ Companion session API (STABLE/WILD, challenge/initiative/voice modes)
 - ✅ 100% локально, без облака
 
 ## Структура

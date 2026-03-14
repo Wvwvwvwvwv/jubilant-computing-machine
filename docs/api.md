@@ -369,6 +369,33 @@ goal: "print(2+2)"               -> heuristic language=python
 }
 ```
 
+
+## Companion API (Port 8000)
+
+Base URL: `http://localhost:8000`
+
+### GET /api/companion/session
+
+Текущая сессионная политика поведения ассистента (`reasoning_mode`, `challenge_mode`, `initiative_mode`, `voice_mode`).
+
+### PATCH /api/companion/session
+
+Частичное обновление сессионной политики.
+
+Пример:
+```json
+{
+  "reasoning_mode": "wild",
+  "challenge_mode": "strict",
+  "initiative_mode": "proactive",
+  "voice_mode": "ptt"
+}
+```
+
+### GET /api/companion/last-response-trace
+
+Последний explainability trace по ответу ассистента. До появления ответа может вернуть `null`.
+
 ## Embeddings Service (Port 8001)
 
 Base URL: `http://localhost:8001`
