@@ -166,6 +166,35 @@ export default function CompanionPage() {
                 <option value="strict">strict</option>
               </select>
             </label>
+
+
+            <label>
+              <div style={{ marginBottom: '0.25rem', color: '#aaa', fontSize: '0.875rem' }}>Initiative mode</div>
+              <select
+                value={session.initiative_mode}
+                onChange={(e) => patchSession({ initiative_mode: e.target.value as Session['initiative_mode'] })}
+                disabled={saving}
+                style={{ width: '100%', padding: '0.6rem', background: '#1a1a1a', color: '#fff', border: '1px solid #333', borderRadius: '0.5rem' }}
+              >
+                <option value="off">off</option>
+                <option value="adaptive">adaptive</option>
+                <option value="proactive">proactive</option>
+              </select>
+            </label>
+
+            <label>
+              <div style={{ marginBottom: '0.25rem', color: '#aaa', fontSize: '0.875rem' }}>Voice mode</div>
+              <select
+                value={session.voice_mode}
+                onChange={(e) => patchSession({ voice_mode: e.target.value as Session['voice_mode'] })}
+                disabled={saving}
+                style={{ width: '100%', padding: '0.6rem', background: '#1a1a1a', color: '#fff', border: '1px solid #333', borderRadius: '0.5rem' }}
+              >
+                <option value="off">off</option>
+                <option value="ptt">ptt</option>
+                <option value="duplex">duplex</option>
+              </select>
+            </label>
           </div>
         </section>
       )}
