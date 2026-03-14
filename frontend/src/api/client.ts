@@ -125,6 +125,16 @@ export const companionAPI = {
   patchRelationshipProfile: async (patch: any) => {
     const { data } = await api.patch('/companion/relationship-profile', patch)
     return data
+  },
+
+  getLastResponseTrace: async () => {
+    const { data } = await api.get('/companion/last-response-trace')
+    return data
+  },
+
+  getResponseTraces: async (limit: number = 5) => {
+    const { data } = await api.get('/companion/response-traces', { params: { limit } })
+    return data
   }
 }
 
