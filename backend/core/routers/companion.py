@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from backend.core.services.companion_memory import CompanionMemory
@@ -99,6 +99,48 @@ class RelationshipFactResponse(BaseModel):
 class RelationshipFactsListResponse(BaseModel):
     items: list[RelationshipFactResponse]
     count: int
+
+
+class InitiativeProposalCreateRequest(BaseModel):
+    text: str = Field(..., min_length=3, max_length=4000)
+    reason: str = Field(..., min_length=3, max_length=2000)
+    expected_value: str = Field(..., min_length=2, max_length=2000)
+    risk_level: str = Field("medium")
+    stop_condition: str = Field(..., min_length=3, max_length=2000)
+    unsolicited: bool = False
+
+
+class InitiativeProposalResponse(BaseModel):
+    proposal_id: str
+    text: str
+    reason: str
+    expected_value: str
+    risk_level: str
+    stop_condition: str
+    unsolicited: bool
+    status: str
+    created_at: float
+    updated_at: float
+
+
+class InitiativeProposalListResponse(BaseModel):
+    items: list[InitiativeProposalResponse]
+    count: int
+
+
+def _proposal_to_response(proposal) -> InitiativeProposalResponse:
+    return InitiativeProposalResponse(
+        proposal_id=proposal.proposal_id,
+        text=proposal.text,
+        reason=proposal.reason,
+        expected_value=proposal.expected_value,
+        risk_level=proposal.risk_level,
+        stop_condition=proposal.stop_condition,
+        unsolicited=proposal.unsolicited,
+        status=proposal.status,
+        created_at=proposal.created_at,
+        updated_at=proposal.updated_at,
+    )
 
 
 @router.get("/session", response_model=CompanionSessionResponse)
@@ -201,5 +243,56 @@ async def list_relationship_facts(req: Request, query: str = "", limit: int = 20
 @router.post("/relationship-facts/{fact_id}/invalidate", response_model=RelationshipFactResponse)
 async def invalidate_relationship_fact(fact_id: str, req: Request):
     memory: CompanionMemory = req.app.state.companion_memory
-    updated = memory.invalidate_fact(fact_id)
+    try:
+        updated = memory.invalidate_fact(fact_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
     return _fact_to_response(updated)
+
+
+@router.post("/proposals", response_model=InitiativeProposalResponse)
+async def create_proposal(body: InitiativeProposalCreateRequest, req: Request):
+    memory: CompanionMemory = req.app.state.companion_memory
+    try:
+        created = memory.add_proposal(
+            text=body.text,
+            reason=body.reason,
+            expected_value=body.expected_value,
+            risk_level=body.risk_level,
+            stop_condition=body.stop_condition,
+            unsolicited=body.unsolicited,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _proposal_to_response(created)
+
+
+@router.get("/proposals", response_model=InitiativeProposalListResponse)
+async def list_proposals(req: Request, status: str = "open", limit: int = 20):
+    memory: CompanionMemory = req.app.state.companion_memory
+    try:
+        items = memory.list_proposals(status=status, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    mapped = [_proposal_to_response(x) for x in items]
+    return InitiativeProposalListResponse(items=mapped, count=len(mapped))
+
+
+@router.post("/proposals/{proposal_id}/dismiss", response_model=InitiativeProposalResponse)
+async def dismiss_proposal(proposal_id: str, req: Request):
+    memory: CompanionMemory = req.app.state.companion_memory
+    try:
+        proposal = memory.update_proposal_status(proposal_id, status="dismissed")
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return _proposal_to_response(proposal)
+
+
+@router.post("/proposals/{proposal_id}/accept", response_model=InitiativeProposalResponse)
+async def accept_proposal(proposal_id: str, req: Request):
+    memory: CompanionMemory = req.app.state.companion_memory
+    try:
+        proposal = memory.update_proposal_status(proposal_id, status="accepted")
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return _proposal_to_response(proposal)

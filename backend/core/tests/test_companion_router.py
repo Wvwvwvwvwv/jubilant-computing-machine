@@ -100,3 +100,54 @@ def test_relationship_profile_patch_and_facts_lifecycle(tmp_path):
     listed_after = client.get("/api/companion/relationship-facts", params={"query": "риски", "limit": 10})
     assert listed_after.status_code == 200
     assert listed_after.json()["count"] == 0
+
+
+def test_initiative_proposals_lifecycle_and_rate_limit(tmp_path):
+    client = make_client(tmp_path)
+
+    # tighten profile limit for deterministic rate-limit test
+    patched = client.patch(
+        "/api/companion/relationship-profile",
+        json={"initiative_preferences": {"max_unsolicited_per_hour": 1}},
+    )
+    assert patched.status_code == 200
+
+    first = client.post(
+        "/api/companion/proposals",
+        json={
+            "text": "Предлагаю ввести ежедневный health-check",
+            "reason": "Снизит риск незаметной деградации",
+            "expected_value": "Быстрее обнаружим сбои",
+            "risk_level": "low",
+            "stop_condition": "Если 7 дней подряд без инцидентов",
+            "unsolicited": True,
+        },
+    )
+    assert first.status_code == 200
+    proposal_id = first.json()["proposal_id"]
+
+    second = client.post(
+        "/api/companion/proposals",
+        json={
+            "text": "Второе unsolicited-предложение",
+            "reason": "Проверка лимита",
+            "expected_value": "Должно заблокироваться",
+            "risk_level": "low",
+            "stop_condition": "Немедленно",
+            "unsolicited": True,
+        },
+    )
+    assert second.status_code == 400
+    assert "rate limit" in second.json()["detail"]
+
+    listed = client.get("/api/companion/proposals", params={"status": "open", "limit": 10})
+    assert listed.status_code == 200
+    assert listed.json()["count"] == 1
+
+    accepted = client.post(f"/api/companion/proposals/{proposal_id}/accept")
+    assert accepted.status_code == 200
+    assert accepted.json()["status"] == "accepted"
+
+    dismissed = client.post(f"/api/companion/proposals/{proposal_id}/dismiss")
+    assert dismissed.status_code == 200
+    assert dismissed.json()["status"] == "dismissed"

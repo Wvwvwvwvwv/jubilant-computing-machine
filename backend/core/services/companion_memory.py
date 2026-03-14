@@ -38,6 +38,21 @@ class RelationshipFact:
     updated_at: float
 
 
+@dataclass
+class InitiativeProposal:
+    proposal_id: str
+    user_id: str
+    text: str
+    reason: str
+    expected_value: str
+    risk_level: str
+    stop_condition: str
+    unsolicited: bool
+    status: str
+    created_at: float
+    updated_at: float
+
+
 class CompanionMemory:
     def __init__(self):
         logs_dir = Path(__file__).resolve().parents[1] / "logs"
@@ -101,6 +116,36 @@ class CompanionMemory:
             )
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS initiative_proposals (
+                  proposal_id TEXT PRIMARY KEY,
+                  user_id TEXT NOT NULL,
+                  text TEXT NOT NULL,
+                  reason TEXT NOT NULL,
+                  expected_value TEXT NOT NULL,
+                  risk_level TEXT NOT NULL,
+                  stop_condition TEXT NOT NULL,
+                  unsolicited INTEGER NOT NULL DEFAULT 0,
+                  status TEXT NOT NULL DEFAULT 'open',
+                  created_at REAL NOT NULL,
+                  updated_at REAL NOT NULL,
+                  FOREIGN KEY(user_id) REFERENCES relationship_profiles(user_id)
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS initiative_proposal_events (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  proposal_id TEXT NOT NULL,
+                  event_kind TEXT NOT NULL,
+                  payload_json TEXT NOT NULL,
+                  ts REAL NOT NULL,
+                  FOREIGN KEY(proposal_id) REFERENCES initiative_proposals(proposal_id)
+                )
+                """
+            )
+            conn.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_relationship_facts_user_status
                 ON relationship_facts(user_id, status)
                 """
@@ -109,6 +154,12 @@ class CompanionMemory:
                 """
                 CREATE INDEX IF NOT EXISTS idx_relationship_fact_events_fact
                 ON relationship_fact_events(fact_id, id)
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_initiative_proposals_user_status
+                ON initiative_proposals(user_id, status, created_at)
                 """
             )
 
@@ -313,3 +364,156 @@ class CompanionMemory:
                 (fact_id, json.dumps({"reason": "manual"}, ensure_ascii=False), now),
             )
         return self.get_fact(fact_id)
+
+    def _recent_unsolicited_count(self, user_id: str = "local_user", window_s: int = 3600) -> int:
+        since = time.time() - window_s
+        with self._db() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS c
+                FROM initiative_proposals
+                WHERE user_id=? AND unsolicited=1 AND created_at>=? AND status IN ('open','accepted')
+                """,
+                (user_id, since),
+            ).fetchone()
+            return int(row["c"]) if row else 0
+
+    def add_proposal(
+        self,
+        text: str,
+        reason: str,
+        expected_value: str,
+        risk_level: str,
+        stop_condition: str,
+        unsolicited: bool,
+        user_id: str = "local_user",
+    ) -> InitiativeProposal:
+        profile = self.get_profile(user_id)
+        if unsolicited and not profile.allow_proactive_suggestions:
+            raise ValueError("proactive suggestions disabled by profile")
+        if unsolicited and self._recent_unsolicited_count(user_id=user_id) >= profile.max_unsolicited_per_hour:
+            raise ValueError("unsolicited proposal rate limit exceeded")
+
+        now = time.time()
+        proposal_id = f"pr_{uuid.uuid4().hex[:12]}"
+        risk_level = (risk_level or "medium").lower()
+        if risk_level not in {"low", "medium", "high"}:
+            risk_level = "medium"
+
+        with self._db() as conn:
+            conn.execute(
+                """
+                INSERT INTO initiative_proposals (
+                  proposal_id, user_id, text, reason, expected_value, risk_level,
+                  stop_condition, unsolicited, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)
+                """,
+                (
+                    proposal_id,
+                    user_id,
+                    text,
+                    reason,
+                    expected_value,
+                    risk_level,
+                    stop_condition,
+                    1 if unsolicited else 0,
+                    now,
+                    now,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO initiative_proposal_events (proposal_id, event_kind, payload_json, ts)
+                VALUES (?, 'created', ?, ?)
+                """,
+                (
+                    proposal_id,
+                    json.dumps(
+                        {
+                            "unsolicited": unsolicited,
+                            "risk_level": risk_level,
+                            "expected_value": expected_value,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    now,
+                ),
+            )
+        return self.get_proposal(proposal_id)
+
+    def get_proposal(self, proposal_id: str) -> InitiativeProposal:
+        with self._db() as conn:
+            row = conn.execute("SELECT * FROM initiative_proposals WHERE proposal_id=?", (proposal_id,)).fetchone()
+            if not row:
+                raise ValueError("proposal not found")
+            return InitiativeProposal(
+                proposal_id=row["proposal_id"],
+                user_id=row["user_id"],
+                text=row["text"],
+                reason=row["reason"],
+                expected_value=row["expected_value"],
+                risk_level=row["risk_level"],
+                stop_condition=row["stop_condition"],
+                unsolicited=bool(row["unsolicited"]),
+                status=row["status"],
+                created_at=float(row["created_at"]),
+                updated_at=float(row["updated_at"]),
+            )
+
+    def list_proposals(self, status: str = "open", limit: int = 20, user_id: str = "local_user") -> list[InitiativeProposal]:
+        limit = max(1, min(int(limit), 200))
+        with self._db() as conn:
+            if status == "all":
+                rows = conn.execute(
+                    "SELECT * FROM initiative_proposals WHERE user_id=? ORDER BY updated_at DESC LIMIT ?",
+                    (user_id, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM initiative_proposals
+                    WHERE user_id=? AND status=?
+                    ORDER BY updated_at DESC LIMIT ?
+                    """,
+                    (user_id, status, limit),
+                ).fetchall()
+
+        return [
+            InitiativeProposal(
+                proposal_id=row["proposal_id"],
+                user_id=row["user_id"],
+                text=row["text"],
+                reason=row["reason"],
+                expected_value=row["expected_value"],
+                risk_level=row["risk_level"],
+                stop_condition=row["stop_condition"],
+                unsolicited=bool(row["unsolicited"]),
+                status=row["status"],
+                created_at=float(row["created_at"]),
+                updated_at=float(row["updated_at"]),
+            )
+            for row in rows
+        ]
+
+    def update_proposal_status(self, proposal_id: str, status: str) -> InitiativeProposal:
+        status = status.lower()
+        if status not in {"accepted", "dismissed", "open"}:
+            raise ValueError("unsupported proposal status")
+        now = time.time()
+        with self._db() as conn:
+            row = conn.execute("SELECT proposal_id FROM initiative_proposals WHERE proposal_id=?", (proposal_id,)).fetchone()
+            if not row:
+                raise ValueError("proposal not found")
+            conn.execute(
+                "UPDATE initiative_proposals SET status=?, updated_at=? WHERE proposal_id=?",
+                (status, now, proposal_id),
+            )
+            conn.execute(
+                """
+                INSERT INTO initiative_proposal_events (proposal_id, event_kind, payload_json, ts)
+                VALUES (?, ?, ?, ?)
+                """,
+                (proposal_id, f"status_{status}", json.dumps({"status": status}, ensure_ascii=False), now),
+            )
+
+        return self.get_proposal(proposal_id)

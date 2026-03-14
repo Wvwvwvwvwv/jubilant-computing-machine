@@ -434,6 +434,23 @@ Base URL: `http://localhost:8000`
 
 Ручная инвалидизация relationship-факта (status -> `invalidated`).
 
+### POST /api/companion/proposals
+
+Создать инициативное предложение (`reason`, `expected_value`, `risk_level`, `stop_condition`, `unsolicited`).
+Для `unsolicited=true` применяется профильный лимит `max_unsolicited_per_hour`.
+
+### GET /api/companion/proposals?status=open&limit=20
+
+Список предложений по статусу (`open|accepted|dismissed|all`).
+
+### POST /api/companion/proposals/{proposal_id}/accept
+
+Отметить предложение как принятое.
+
+### POST /api/companion/proposals/{proposal_id}/dismiss
+
+Отметить предложение как отклонённое.
+
 ## Embeddings Service (Port 8001)
 
 Base URL: `http://localhost:8001`
