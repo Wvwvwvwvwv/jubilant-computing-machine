@@ -31,6 +31,47 @@ class ChatResponse(BaseModel):
     context_items: int
 
 
+MAX_CHAT_HISTORY_MESSAGES = 14
+MAX_MEMORY_CONTEXT_ITEMS = 3
+
+
+def _normalize_text(text: str) -> str:
+    return " ".join((text or "").split()).strip().lower()
+
+
+def trim_chat_history(messages: List[ChatMessage], max_messages: int = MAX_CHAT_HISTORY_MESSAGES) -> List[ChatMessage]:
+    """Keep recent history while preserving any system messages already injected."""
+    if len(messages) <= max_messages:
+        return messages
+
+    system_msgs = [m for m in messages if m.role == "system"]
+    non_system = [m for m in messages if m.role != "system"]
+    keep_non_system = non_system[-max_messages:]
+    return [*system_msgs, *keep_non_system]
+
+
+def build_memory_context_block(items: list[dict], limit: int = MAX_MEMORY_CONTEXT_ITEMS) -> str:
+    """Deduplicate noisy memory items and keep only compact relevant snippets."""
+    filtered: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        raw = str(item.get("content", "") or "").strip()
+        if not raw:
+            continue
+        lowered = raw.lower()
+        if "smoke memory item" in lowered or "system: answer to" in lowered:
+            continue
+        normalized = _normalize_text(raw)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        filtered.append(raw[:500])
+        if len(filtered) >= limit:
+            break
+
+    return "\n\n".join([f"[Память {i + 1}]: {text}" for i, text in enumerate(filtered)])
+
+
 def serialize_messages(messages: List[ChatMessage]) -> List[dict]:
     """Pydantic model -> plain dict для совместимости с KoboldClient."""
     serialized = []
@@ -92,6 +133,7 @@ def infer_uncertainty_markers(text: str) -> list[str]:
     return markers
 
 
+@router.post("", response_model=ChatResponse)
 @router.post("/", response_model=ChatResponse)
 async def chat(request: ChatRequest, req: Request):
     """Чат с LLM через KoboldCpp с использованием памяти Roampal и companion-политик."""
@@ -124,19 +166,22 @@ async def chat(request: ChatRequest, req: Request):
 
     # Получение релевантного контекста из памяти
     if request.use_memory:
-        memory_context = await memory_engine.search(query_text, limit=5)
-        context_items = len(memory_context)
+        memory_context = await memory_engine.search(query_text, limit=8)
 
         # Добавление контекста в промпт
         if memory_context:
-            context_text = "\n\n".join([f"[Память {i + 1}]: {item['content']}" for i, item in enumerate(memory_context)])
+            context_text = build_memory_context_block(memory_context, limit=MAX_MEMORY_CONTEXT_ITEMS)
 
             # Вставка контекста перед последним сообщением
-            system_msg = ChatMessage(
-                role="system",
-                content=f"Релевантный контекст из памяти:\n{context_text}",
-            )
-            working_messages.insert(-1, system_msg)
+            if context_text:
+                system_msg = ChatMessage(
+                    role="system",
+                    content=f"Релевантный контекст из памяти:\n{context_text}",
+                )
+                working_messages.insert(-1, system_msg)
+                context_items = context_text.count("[Память ")
+
+    working_messages = trim_chat_history(working_messages)
 
     # Отправка в KoboldCpp
     try:

@@ -7,7 +7,7 @@ const api = axios.create({
 
 export const chatAPI = {
   send: async (messages: any[], useMemory: boolean = true) => {
-    const { data } = await api.post('/chat', {
+    const { data } = await api.post('/chat/', {
       messages,
       use_memory: useMemory
     })

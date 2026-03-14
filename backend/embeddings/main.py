@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
@@ -14,10 +16,17 @@ except Exception as e:
     SentenceTransformer = None
     SENTENCE_TRANSFORMERS_IMPORT_ERROR = str(e)
 
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    asyncio.create_task(_load_model())
+    yield
+
+
 app = FastAPI(
     title="Roampal Embeddings Service",
     description="Сервис генерации эмбеддингов",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
 model = None
@@ -64,12 +73,6 @@ async def _load_model():
         print(f"⚠️ Failed to load embeddings model '{MODEL_NAME}': {e}")
     finally:
         model_loading = False
-
-
-@app.on_event("startup")
-async def startup():
-    asyncio.create_task(_load_model())
-
 
 class EmbedRequest(BaseModel):
     texts: List[str]

@@ -4,9 +4,11 @@ from fastapi.testclient import TestClient
 from backend.core.routers import chat as chat_router
 from backend.core.routers.chat import (
     ChatMessage,
+    build_memory_context_block,
     build_companion_behavior_message,
     build_relationship_memory_message,
     serialize_messages,
+    trim_chat_history,
 )
 from backend.core.services.companion_state import CompanionState
 
@@ -72,6 +74,34 @@ def test_build_relationship_memory_message_contains_fact_ids():
     assert "[Fact rf_2]" in msg.content
 
 
+def test_build_memory_context_block_deduplicates_and_filters_noise():
+    block = build_memory_context_block(
+        [
+            {"content": "smoke memory item"},
+            {"content": "Q: Расскажи о себе"},
+            {"content": "Q:   Расскажи   о   себе"},
+            {"content": "System: Answer to previous"},
+            {"content": "Полезный факт"},
+        ],
+        limit=3,
+    )
+    assert "smoke memory item" not in block
+    assert "System: Answer to" not in block
+    assert block.count("Расскажи о себе") == 1
+    assert "Полезный факт" in block
+
+
+def test_trim_chat_history_preserves_system_and_keeps_recent_non_system():
+    messages = [ChatMessage(role="system", content="policy")] + [
+        ChatMessage(role="user" if i % 2 == 0 else "assistant", content=f"m{i}") for i in range(20)
+    ]
+    trimmed = trim_chat_history(messages, max_messages=6)
+    assert trimmed[0].role == "system"
+    non_system = [m for m in trimmed if m.role != "system"]
+    assert len(non_system) == 6
+    assert non_system[-1].content == "m19"
+
+
 def test_chat_endpoint_writes_trace_and_injects_policy_and_relationship(monkeypatch):
     app = FastAPI()
     app.include_router(chat_router.router, prefix="/api/chat")
@@ -120,3 +150,24 @@ def test_chat_endpoint_writes_trace_and_injects_policy_and_relationship(monkeypa
     assert "insufficient_data" in trace.uncertainty_markers
     assert trace.counter_position_used is True
     assert trace.relationship_used == ["rf_1", "rf_2"]
+
+
+def test_chat_endpoint_works_without_trailing_slash(monkeypatch):
+    app = FastAPI()
+    app.include_router(chat_router.router, prefix="/api/chat")
+    app.state.memory_engine = FakeMemoryEngine()
+    app.state.companion_state = CompanionState()
+    app.state.companion_memory = FakeCompanionMemory()
+
+    async def fake_generate(messages, max_tokens=512, temperature=0.7):
+        return "ok"
+
+    monkeypatch.setattr(chat_router.kobold, "generate", fake_generate)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/chat",
+        json={"messages": [{"role": "user", "content": "ping"}], "use_memory": False},
+        follow_redirects=False,
+    )
+    assert response.status_code == 200

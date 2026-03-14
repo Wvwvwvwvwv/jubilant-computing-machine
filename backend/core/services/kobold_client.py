@@ -28,7 +28,8 @@ class KoboldClient:
             "top_p": top_p,
             "top_k": top_k,
             "rep_pen": 1.1,
-            "stop_sequence": ["</s>", "User:", "Assistant:"]
+            # Keep stop markers conservative to avoid premature stop on transcript tokens.
+            "stop_sequence": ["</s>"]
         }
         
         try:
