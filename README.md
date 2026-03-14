@@ -81,6 +81,7 @@ bash termux/deploy.sh work
 - ✅ Векторный поиск и эмбеддинги
 - ✅ MCP интеграция
 - ✅ Companion session API (STABLE/WILD, challenge/initiative/voice modes)
+- ✅ Voice control-plane API (start/stop/health for local voice sessions)
 - ✅ 100% локально, без облака
 
 ## Структура

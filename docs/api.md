@@ -451,6 +451,31 @@ Base URL: `http://localhost:8000`
 
 Отметить предложение как отклонённое.
 
+## Voice API (Port 8000)
+
+Base URL: `http://localhost:8000`
+
+### POST /api/voice/session/start
+
+Старт локальной voice-сессии.
+
+Пример:
+```json
+{
+  "mode": "ptt",
+  "stt_engine": "local_whisper_cpp",
+  "tts_engine": "local_piper"
+}
+```
+
+### POST /api/voice/session/{voice_session_id}/stop
+
+Остановка voice-сессии.
+
+### GET /api/voice/session/{voice_session_id}/health
+
+Health-статус сессии (для MVP: synthetic health snapshot).
+
 ## Embeddings Service (Port 8001)
 
 Base URL: `http://localhost:8001`
