@@ -94,7 +94,7 @@ fi
 echo "[info] voice_session_id=$VOICE_SESSION_ID"
 
 echo "[step] patch metrics"
-METRICS_BODY="$(python - <<'PY' "$LATENCY_P95_MS" "$CRASH_FREE_RATE" "$AUDIO_LOSS_PERCENT" "$APPROVAL_BYPASS_INCIDENTS" "$USER_SCORE"
+METRICS_BODY_FULL="$(python - <<'PY' "$LATENCY_P95_MS" "$CRASH_FREE_RATE" "$AUDIO_LOSS_PERCENT" "$APPROVAL_BYPASS_INCIDENTS" "$USER_SCORE"
 import json,sys
 print(json.dumps({
   "latency_p95_ms": int(float(sys.argv[1])),
@@ -105,13 +105,40 @@ print(json.dumps({
 }))
 PY
 )"
-PATCH_RAW="$(api_call PATCH "$CORE_URL/api/voice/session/$VOICE_SESSION_ID/metrics" "$METRICS_BODY")"
-PATCH_CODE="$(printf '%s' "$PATCH_RAW" | head -n1)"
-PATCH_RESP="$(printf '%s' "$PATCH_RAW" | tail -n +2)"
-if [[ "$PATCH_CODE" -lt 200 || "$PATCH_CODE" -ge 300 ]]; then
-  echo "[warn] metrics patch failed: HTTP $PATCH_CODE" >&2
-  echo "[warn] continuing without patched metrics" >&2
+METRICS_BODY_REDUCED="$(python - <<'PY' "$LATENCY_P95_MS" "$CRASH_FREE_RATE" "$AUDIO_LOSS_PERCENT" "$USER_SCORE"
+import json,sys
+print(json.dumps({
+  "latency_p95_ms": int(float(sys.argv[1])),
+  "crash_free_rate": float(sys.argv[2]),
+  "audio_loss_percent": float(sys.argv[3]),
+  "user_score": float(sys.argv[4]),
+}))
+PY
+)"
+METRICS_BODY_MINIMAL="$(python - <<'PY' "$LATENCY_P95_MS"
+import json,sys
+print(json.dumps({"latency_p95_ms": int(float(sys.argv[1]))}))
+PY
+)"
+
+patch_ok=0
+for payload_name in FULL REDUCED MINIMAL; do
+  body_var="METRICS_BODY_${payload_name}"
+  payload="${!body_var}"
+  PATCH_RAW="$(api_call PATCH "$CORE_URL/api/voice/session/$VOICE_SESSION_ID/metrics" "$payload")"
+  PATCH_CODE="$(printf '%s' "$PATCH_RAW" | head -n1)"
+  PATCH_RESP="$(printf '%s' "$PATCH_RAW" | tail -n +2)"
+  if [[ "$PATCH_CODE" -ge 200 && "$PATCH_CODE" -lt 300 ]]; then
+    echo "[info] metrics patch applied with payload=$payload_name"
+    patch_ok=1
+    break
+  fi
+  echo "[warn] metrics patch failed for payload=$payload_name: HTTP $PATCH_CODE" >&2
   echo "[warn] response: $PATCH_RESP" >&2
+done
+
+if [[ "$patch_ok" -ne 1 ]]; then
+  echo "[warn] continuing without patched metrics" >&2
 fi
 
 echo "[step] fetch health"
