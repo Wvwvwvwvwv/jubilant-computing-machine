@@ -72,10 +72,32 @@ fi
 check_microphone_physical() {
   echo "[step] microphone preflight"
 
+  local tmp_candidates=()
+  if [[ -n "${TMPDIR:-}" ]]; then
+    tmp_candidates+=("$TMPDIR")
+  fi
+  tmp_candidates+=("$HOME/tmp" "/data/data/com.termux/files/usr/tmp" "/tmp")
+
+  local rec_file=""
+  local candidate
+  for candidate in "${tmp_candidates[@]}"; do
+    [[ -n "$candidate" ]] || continue
+    mkdir -p "$candidate" >/dev/null 2>&1 || true
+    if [[ ! -d "$candidate" || ! -w "$candidate" ]]; then
+      continue
+    fi
+    rec_file="$(mktemp "$candidate/voice-mic-check-XXXXXX.m4a" 2>/dev/null || true)"
+    if [[ -n "$rec_file" ]]; then
+      break
+    fi
+  done
+
+  if [[ -z "$rec_file" ]]; then
+    echo "[warn] failed to create temp file for mic preflight (tried: ${tmp_candidates[*]})" >&2
+  fi
+
   # Preferred path on Android/Termux with Termux:API.
-  if command -v termux-microphone-record >/dev/null 2>&1; then
-    local rec_file
-    rec_file="$(mktemp /tmp/voice-mic-check-XXXXXX.m4a)"
+  if command -v termux-microphone-record >/dev/null 2>&1 && [[ -n "$rec_file" ]]; then
 
     if termux-microphone-record -f "$rec_file" -l 2 >/dev/null 2>&1; then
       sleep 3

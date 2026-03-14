@@ -71,6 +71,24 @@ bash termux/voice-readiness-check.sh
 bash termux/voice-readiness-check.sh --manual-mic-ok
 ```
 
+### Настройка микрофона в Termux (обязательно для auto preflight)
+```bash
+cd ~/roampal-android
+
+# 1) установить Termux:API CLI
+pkg update && pkg install -y termux-api
+
+# 2) выдать Android-разрешение RECORD_AUDIO для приложения Termux
+#    Android Settings -> Apps -> Termux -> Permissions -> Microphone -> Allow
+
+# 3) базовый тест записи (должен отработать без ошибки permissions)
+termux-microphone-record -d 2
+```
+
+Если `termux-microphone-record` недоступен или не может создать временный файл в `/tmp`,
+`voice-readiness-check.sh` автоматически использует fallback-директории (`$TMPDIR`, `$HOME/tmp`,
+`/data/data/com.termux/files/usr/tmp`, `/tmp`).
+
 Если видите "Ошибка соединения с сервером", запустите диагностику:
 ```bash
 cd ~/roampal-android
