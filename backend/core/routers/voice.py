@@ -47,6 +47,13 @@ class VoiceGoNoGoResponse(BaseModel):
     metrics: dict
 
 
+def _model_dump_compat(model: BaseModel) -> dict:
+    dump = getattr(model, "model_dump", None)
+    if callable(dump):
+        return dump(exclude_none=True)
+    return model.dict(exclude_none=True)
+
+
 @router.post("/session/start", response_model=VoiceSessionResponse)
 async def start_voice_session(body: VoiceSessionStartRequest, req: Request):
     state: VoiceState = req.app.state.voice_state
@@ -84,7 +91,8 @@ async def health_voice_session(voice_session_id: str, req: Request):
 async def update_voice_metrics(voice_session_id: str, body: VoiceMetricsUpdateRequest, req: Request):
     state: VoiceState = req.app.state.voice_state
     try:
-        sess = state.update_metrics(voice_session_id=voice_session_id, **body.model_dump(exclude_none=True))
+        payload = _model_dump_compat(body)
+        sess = state.update_metrics(voice_session_id=voice_session_id, **payload)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
