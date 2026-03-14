@@ -17,11 +17,34 @@ type MicProbeResult = {
 
 const MIC_MIN_ABSOLUTE_RMS = 0.004
 const MIC_RELATIVE_GAIN = 1.8
+const VOICE_SESSION_KEY = 'voice_session_id'
+const VOICE_MODE_KEY = 'voice_mode'
+const VOICE_GENDER_KEY = 'voice_gender'
 
 export default function VoicePage() {
-  const [mode, setMode] = useState<'ptt' | 'duplex'>('ptt')
-  const [voiceGender, setVoiceGender] = useState<'male' | 'female'>('female')
-  const [sessionId, setSessionId] = useState('')
+  const [mode, setMode] = useState<'ptt' | 'duplex'>(() => {
+    try {
+      const raw = localStorage.getItem(VOICE_MODE_KEY)
+      return raw === 'duplex' ? 'duplex' : 'ptt'
+    } catch {
+      return 'ptt'
+    }
+  })
+  const [voiceGender, setVoiceGender] = useState<'male' | 'female'>(() => {
+    try {
+      const raw = localStorage.getItem(VOICE_GENDER_KEY)
+      return raw === 'male' ? 'male' : 'female'
+    } catch {
+      return 'female'
+    }
+  })
+  const [sessionId, setSessionId] = useState(() => {
+    try {
+      return localStorage.getItem(VOICE_SESSION_KEY) || ''
+    } catch {
+      return ''
+    }
+  })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [health, setHealth] = useState<any | null>(null)
@@ -74,6 +97,34 @@ export default function VoicePage() {
 
   const isVoiceEnabled = Boolean(sessionId)
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(VOICE_MODE_KEY, mode)
+    } catch {
+      // ignore
+    }
+  }, [mode])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(VOICE_GENDER_KEY, voiceGender)
+    } catch {
+      // ignore
+    }
+  }, [voiceGender])
+
+  useEffect(() => {
+    try {
+      if (sessionId) {
+        localStorage.setItem(VOICE_SESSION_KEY, sessionId)
+      } else {
+        localStorage.removeItem(VOICE_SESSION_KEY)
+      }
+    } catch {
+      // ignore
+    }
+  }, [sessionId])
+
   const syncMicVerification = async (
     sid: string | undefined,
     verified: boolean,
@@ -87,6 +138,29 @@ export default function VoicePage() {
       // Keep UI responsive: health/go-no-go refresh can retry verification later.
     }
   }
+
+  useEffect(() => {
+    const restore = async () => {
+      if (!sessionId) return
+      try {
+        const h = await voiceAPI.health(sessionId)
+        if (h?.status === 'stopped') {
+          setSessionId('')
+          return
+        }
+        const g = await voiceAPI.goNoGo(sessionId)
+        setHealth(h)
+        setGoNoGo(g)
+        if (micStatus !== 'connected') {
+          await connectMic(sessionId)
+        }
+      } catch {
+        setSessionId('')
+      }
+    }
+    void restore()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     return () => {
