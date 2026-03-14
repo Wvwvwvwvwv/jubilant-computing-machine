@@ -40,6 +40,8 @@ class CompanionState:
         now = time.time()
         self._session = CompanionSession(updated_at=now)
         self._last_trace: Optional[ResponseTrace] = None
+        self._trace_history: list[ResponseTrace] = []
+        self._trace_history_limit = 200
 
     def get_session(self) -> CompanionSession:
         return self._session
@@ -65,6 +67,10 @@ class CompanionState:
     def get_last_trace(self) -> Optional[ResponseTrace]:
         return self._last_trace
 
+    def get_trace_history(self, limit: int = 50) -> list[ResponseTrace]:
+        limit = max(1, min(int(limit), 500))
+        return self._trace_history[-limit:]
+
     def set_last_trace(
         self,
         response_id: str,
@@ -85,4 +91,7 @@ class CompanionState:
             ts=time.time(),
         )
         self._last_trace = trace
+        self._trace_history.append(trace)
+        if len(self._trace_history) > self._trace_history_limit:
+            self._trace_history = self._trace_history[-self._trace_history_limit:]
         return trace

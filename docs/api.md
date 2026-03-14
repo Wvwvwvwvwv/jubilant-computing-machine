@@ -399,6 +399,10 @@ Base URL: `http://localhost:8000`
 Примечание: trace обновляется после успешного `POST /api/chat/` и отражает активные `reasoning_mode/challenge_mode`.
 Примечание: `relationship_used` в trace заполняется ID relationship-фактов, реально подмешанных в chat prompt.
 
+### GET /api/companion/response-traces?limit=50
+
+История explainability trace (в порядке накопления) для аудита динамики поведения.
+
 ### GET /api/companion/relationship-profile
 
 Получить профиль relationship memory (стиль, дебат-предпочтения, инициативность).

@@ -42,6 +42,11 @@ class LastResponseTraceResponse(BaseModel):
     ts: float
 
 
+class ResponseTraceHistoryResponse(BaseModel):
+    items: list[LastResponseTraceResponse]
+    count: int
+
+
 class StylePatch(BaseModel):
     verbosity: Optional[str] = None
     tone: Optional[str] = None
@@ -251,6 +256,16 @@ def _fact_to_response(fact) -> RelationshipFactResponse:
         created_at=fact.created_at,
         updated_at=fact.updated_at,
     )
+
+
+
+
+@router.get("/response-traces", response_model=ResponseTraceHistoryResponse)
+async def get_response_traces(req: Request, limit: int = 50):
+    state: CompanionState = req.app.state.companion_state
+    traces = state.get_trace_history(limit=limit)
+    items = [LastResponseTraceResponse(**t.__dict__) for t in traces]
+    return ResponseTraceHistoryResponse(items=items, count=len(items))
 
 
 @router.get("/relationship-profile", response_model=RelationshipProfileResponse)

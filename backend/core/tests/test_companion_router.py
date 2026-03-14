@@ -199,3 +199,37 @@ def test_proposal_events_not_found_returns_404(tmp_path):
     client = make_client(tmp_path)
     response = client.get('/api/companion/proposals/pr_missing/events')
     assert response.status_code == 404
+
+
+def test_response_traces_history_endpoint(tmp_path):
+    client = make_client(tmp_path)
+
+    # seed traces directly through state service
+    app = client.app
+    app.state.companion_state.update_session(reasoning_mode="stable", challenge_mode="balanced")
+    app.state.companion_state.set_last_trace(
+        response_id="resp_1",
+        relationship_used=["rf_1"],
+        uncertainty_markers=["insufficient_data"],
+        counter_position_used=True,
+        confidence=0.7,
+    )
+    app.state.companion_state.update_session(reasoning_mode="wild", challenge_mode="strict")
+    app.state.companion_state.set_last_trace(
+        response_id="resp_2",
+        relationship_used=["rf_2"],
+        uncertainty_markers=["hypothesis_present"],
+        counter_position_used=True,
+        confidence=0.6,
+    )
+
+    last = client.get('/api/companion/last-response-trace')
+    assert last.status_code == 200
+    assert last.json()['response_id'] == 'resp_2'
+
+    history = client.get('/api/companion/response-traces', params={'limit': 10})
+    assert history.status_code == 200
+    data = history.json()
+    assert data['count'] == 2
+    assert data['items'][0]['response_id'] == 'resp_1'
+    assert data['items'][1]['response_id'] == 'resp_2'
