@@ -490,6 +490,14 @@ Base URL: `http://localhost:8000`
 
 Health-статус сессии (для MVP: synthetic health snapshot).
 
+### PATCH /api/voice/session/{voice_session_id}/metrics
+
+Обновить наблюдаемые voice-метрики для оценки readiness (`latency_p95_ms`, `crash_free_rate`, `audio_loss_percent`, `approval_bypass_incidents`, `user_score`).
+
+### GET /api/voice/session/{voice_session_id}/go-no-go
+
+Вернуть решение `GO|NO_GO` по критериям rollout и список проваленных checks.
+
 ## Embeddings Service (Port 8001)
 
 Base URL: `http://localhost:8001`

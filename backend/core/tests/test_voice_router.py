@@ -49,3 +49,32 @@ def test_voice_session_missing_returns_404():
     client = make_client()
     response = client.get("/api/voice/session/vs_missing/health")
     assert response.status_code == 404
+
+
+def test_voice_go_no_go_default_is_go_and_can_turn_no_go():
+    client = make_client()
+
+    started = client.post("/api/voice/session/start", json={"mode": "ptt"})
+    sid = started.json()["voice_session_id"]
+
+    go = client.get(f"/api/voice/session/{sid}/go-no-go")
+    assert go.status_code == 200
+    assert go.json()["decision"] == "GO"
+
+    patched = client.patch(
+        f"/api/voice/session/{sid}/metrics",
+        json={
+            "latency_p95_ms": 4500,
+            "audio_loss_percent": 5.0,
+            "user_score": 2.5,
+        },
+    )
+    assert patched.status_code == 200
+
+    no_go = client.get(f"/api/voice/session/{sid}/go-no-go")
+    assert no_go.status_code == 200
+    data = no_go.json()
+    assert data["decision"] == "NO_GO"
+    assert "latency_p95_ms_le_2500" in data["failed_checks"]
+    assert "audio_loss_percent_le_2" in data["failed_checks"]
+    assert "user_score_ge_4" in data["failed_checks"]
