@@ -48,6 +48,16 @@ cd ~/roampal-android
 bash termux/full-smoke.sh
 ```
 
+### Voice readiness-check на устройстве
+```bash
+cd ~/roampal-android
+# Базовый прогон (PTT, женский голос, GO-метрики по умолчанию)
+bash termux/voice-readiness-check.sh
+
+# Строгий режим: завершится с code=1, если решение не GO
+MODE=duplex VOICE_GENDER=male bash termux/voice-readiness-check.sh --strict
+```
+
 Если видите "Ошибка соединения с сервером", запустите диагностику:
 ```bash
 cd ~/roampal-android
