@@ -94,6 +94,9 @@ class VoiceState:
         if sess.status == "stopped":
             return {
                 "status": "stopped",
+                "mode": sess.mode,
+                "stt_engine": sess.stt_engine,
+                "tts_engine": sess.tts_engine,
                 "input_device": "unknown",
                 "stt": "stopped",
                 "tts": "stopped",
@@ -103,6 +106,9 @@ class VoiceState:
 
         return {
             "status": "healthy",
+            "mode": sess.mode,
+            "stt_engine": sess.stt_engine,
+            "tts_engine": sess.tts_engine,
             "input_device": "ok",
             "stt": "ok",
             "tts": "ok",

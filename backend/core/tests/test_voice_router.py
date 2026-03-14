@@ -28,6 +28,9 @@ def test_voice_session_start_health_stop_flow():
     assert health.status_code == 200
     hdata = health.json()
     assert hdata["status"] == "healthy"
+    assert hdata["mode"] == "ptt"
+    assert hdata["stt_engine"] == "local_whisper_cpp"
+    assert hdata["tts_engine"] == "local_piper"
     assert hdata["latency_p95_ms"] == 1700
 
     stopped = client.post(f"/api/voice/session/{voice_session_id}/stop")
@@ -37,6 +40,7 @@ def test_voice_session_start_health_stop_flow():
     health_after = client.get(f"/api/voice/session/{voice_session_id}/health")
     assert health_after.status_code == 200
     assert health_after.json()["status"] == "stopped"
+    assert health_after.json()["tts_engine"] == "local_piper"
 
 
 def test_voice_session_start_invalid_mode_returns_400():

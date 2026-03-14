@@ -494,6 +494,8 @@ Base URL: `http://localhost:8000`
 
 Health-статус сессии (для MVP: synthetic health snapshot).
 
+Возвращает также активную voice-конфигурацию: `mode`, `stt_engine`, `tts_engine`.
+
 ### PATCH /api/voice/session/{voice_session_id}/metrics
 
 Обновить наблюдаемые voice-метрики для оценки readiness (`latency_p95_ms`, `crash_free_rate`, `audio_loss_percent`, `approval_bypass_incidents`, `user_score`).

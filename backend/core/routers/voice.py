@@ -20,6 +20,9 @@ class VoiceSessionResponse(BaseModel):
 
 class VoiceSessionHealthResponse(BaseModel):
     status: str
+    mode: str
+    stt_engine: str
+    tts_engine: str
     input_device: str
     stt: str
     tts: str
