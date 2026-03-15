@@ -8,7 +8,7 @@ from backend.core.services.companion_memory import CompanionMemory
 from backend.core.services.companion_state import CompanionState
 from backend.core.services.kobold_client import KoboldClient
 from backend.core.services.memory_engine import MemoryEngine
-from backend.core.services.retrieval import LegacyMemoryRetriever, multimodal_rag_enabled
+from backend.core.services.retrieval import search_with_backend
 
 router = APIRouter()
 kobold = KoboldClient()
@@ -128,13 +128,13 @@ def build_relationship_memory_message(facts: list[dict]) -> ChatMessage:
 
 async def search_memory_context(req: Request, memory_engine: MemoryEngine, query_text: str, limit: int = 8) -> tuple[list[dict], str]:
     """Resolve active retriever backend (legacy by default, multimodal by flag)."""
-    if multimodal_rag_enabled():
-        mm_retriever = getattr(req.app.state, "multimodal_retriever", None)
-        if mm_retriever is not None and hasattr(mm_retriever, "search"):
-            return await mm_retriever.search(query_text, limit=limit), "multimodal"
-
-    legacy_retriever = LegacyMemoryRetriever(memory_engine)
-    return await legacy_retriever.search(query_text, limit=limit), "legacy"
+    mm_retriever = getattr(req.app.state, "multimodal_retriever", None)
+    return await search_with_backend(
+        memory_engine=memory_engine,
+        query_text=query_text,
+        limit=limit,
+        multimodal_retriever=mm_retriever,
+    )
 
 def infer_uncertainty_markers(text: str) -> list[str]:
     lowered = (text or "").lower()

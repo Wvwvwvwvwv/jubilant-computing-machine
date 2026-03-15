@@ -635,3 +635,41 @@ Base URL: `http://localhost:5001`
 ## Authentication
 
 Не требуется - все локально.
+
+
+## Retrieval API (Port 8000)
+
+Base URL: `http://localhost:8000`
+
+### GET /api/retrieval/health
+
+Показывает состояние week-1 retrieval переключателя:
+- `multimodal_flag` — включен ли `MULTIMODAL_RAG_ENABLED`
+- `multimodal_injected` — подмешан ли runtime retriever в `app.state.multimodal_retriever`
+
+### POST /api/retrieval/search
+
+Единая точка retrieval-поиска (legacy/multimodal в зависимости от флага).
+
+**Request:**
+```json
+{
+  "query": "найди контекст по миграции",
+  "limit": 8
+}
+```
+
+**Response:**
+```json
+{
+  "backend": "legacy",
+  "count": 1,
+  "results": [
+    {
+      "id": "abc123",
+      "content": "...",
+      "score": 0.91
+    }
+  ]
+}
+```

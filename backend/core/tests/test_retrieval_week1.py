@@ -2,7 +2,7 @@ import asyncio
 from types import SimpleNamespace
 
 from backend.core.routers.chat import search_memory_context
-from backend.core.services.retrieval import LegacyMemoryRetriever, multimodal_rag_enabled
+from backend.core.services.retrieval import LegacyMemoryRetriever, multimodal_rag_enabled, search_with_backend
 
 
 class FakeMemoryEngine:
@@ -50,3 +50,10 @@ def test_search_memory_context_uses_multimodal_when_flag_on(monkeypatch):
 
     assert backend == "multimodal"
     assert result[0]["id"] == "mm_1"
+
+
+def test_search_with_backend_fallbacks_to_legacy_when_mm_missing(monkeypatch):
+    monkeypatch.setenv("MULTIMODAL_RAG_ENABLED", "1")
+    result, backend = asyncio.run(search_with_backend(FakeMemoryEngine(), "plan", limit=5, multimodal_retriever=None))
+    assert backend == "legacy"
+    assert result[0]["id"] == "legacy_1"

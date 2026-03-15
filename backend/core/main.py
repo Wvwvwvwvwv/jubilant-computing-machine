@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
-from backend.core.routers import books, chat, companion, memory, sandbox, tasks, voice
+from backend.core.routers import books, chat, companion, memory, retrieval, sandbox, tasks, voice
 from backend.core.services.memory_engine import MemoryEngine
 from backend.core.services.task_runner import TaskRunner
 from backend.core.services.companion_state import CompanionState
@@ -54,6 +54,7 @@ app.include_router(sandbox.router, prefix="/api/sandbox", tags=["sandbox"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
 app.include_router(companion.router, prefix="/api/companion", tags=["companion"])
 app.include_router(voice.router, prefix="/api/voice", tags=["voice"])
+app.include_router(retrieval.router, prefix="/api/retrieval", tags=["retrieval"])
 
 
 @app.get("/")
@@ -69,6 +70,7 @@ async def root():
             "tasks": "/api/tasks",
             "companion": "/api/companion",
             "voice": "/api/voice",
+            "retrieval": "/api/retrieval",
             "docs": "/docs",
         },
     }

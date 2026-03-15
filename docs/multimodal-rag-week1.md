@@ -12,6 +12,7 @@ Week 1 introduces a safe retrieval abstraction layer without breaking existing c
 - Runtime hook `app.state.multimodal_retriever` for future RAG-Anything adapter injection.
 - Chat context block now marks selected retrieval backend (`legacy` or `multimodal`).
 - Companion response traces include `retrieval_backend` for explainability/audit.
+- Retrieval API endpoints for Week 1: `GET /api/retrieval/health` and `POST /api/retrieval/search`.
 
 ## Rollout Contract
 
