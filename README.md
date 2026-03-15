@@ -123,6 +123,8 @@ bash scripts/full-end-to-end-check.sh
 - быструю проверку синтаксиса ключевых backend-модулей;
 - единый интеграционный smoke-тест `backend/core/tests/test_full_system_check.py`.
 
+Если в окружении нет глобальной команды `pytest`, скрипт автоматически попробует `poetry run pytest` и затем `python -m pytest`.
+
 ### 5. Автоматическое развертывание (рекомендуется)
 ```bash
 curl -sSL https://raw.githubusercontent.com/Wvwvwvwvwv/jubilant-computing-machine/main/termux/deploy.sh | bash -s -- work
