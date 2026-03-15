@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 from backend.core.services.memory_engine import MemoryEngine
 from backend.core.services.retrieval import multimodal_rag_enabled, search_with_backend
-from backend.core.services.retrieval_jobs import RetrievalJobState
+from backend.core.services.retrieval_jobs import JobStatus, RetrievalJobState
 
 router = APIRouter()
 
@@ -24,6 +24,7 @@ class RetrievalSearchResponse(BaseModel):
 class RetrievalIndexRequest(BaseModel):
     source_type: Literal["book", "file", "url", "manual"]
     source_ref: str = Field(..., min_length=1, max_length=4000)
+    process_now: bool = True
 
 
 class RetrievalIndexJobResponse(BaseModel):
@@ -34,6 +35,9 @@ class RetrievalIndexJobResponse(BaseModel):
     created_at: float
     updated_at: float
     error: str | None = None
+    started_at: float | None = None
+    completed_at: float | None = None
+    attempts: int
 
 
 class RetrievalJobsListResponse(BaseModel):
@@ -70,13 +74,15 @@ async def retrieval_search(body: RetrievalSearchRequest, req: Request):
 async def create_index_job(body: RetrievalIndexRequest, req: Request):
     job_state: RetrievalJobState = req.app.state.retrieval_job_state
     job = job_state.create_index_job(source_type=body.source_type, source_ref=body.source_ref)
+    if body.process_now:
+        job = job_state.process_job(job.job_id) or job
     return RetrievalIndexJobResponse(**job.__dict__)
 
 
 @router.get("/jobs", response_model=RetrievalJobsListResponse)
-async def list_index_jobs(req: Request, limit: int = 20):
+async def list_index_jobs(req: Request, limit: int = 20, status: JobStatus | None = None):
     job_state: RetrievalJobState = req.app.state.retrieval_job_state
-    jobs = job_state.list_jobs(limit=limit)
+    jobs = job_state.list_jobs(limit=limit, status=status)
     items = [RetrievalIndexJobResponse(**job.__dict__) for job in jobs]
     return RetrievalJobsListResponse(items=items, count=len(items))
 

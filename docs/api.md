@@ -685,7 +685,8 @@ Base URL: `http://localhost:8000`
 ```json
 {
   "source_type": "book",
-  "source_ref": "book_123"
+  "source_ref": "book_123",
+  "process_now": true
 }
 ```
 
@@ -698,14 +699,19 @@ Base URL: `http://localhost:8000`
   "status": "completed",
   "created_at": 1730000000.0,
   "updated_at": 1730000000.0,
-  "error": null
+  "error": null,
+  "started_at": 1730000000.0,
+  "completed_at": 1730000000.1,
+  "attempts": 1
 }
 ```
 
-### GET /api/retrieval/jobs?limit=20
+### GET /api/retrieval/jobs?limit=20&status=completed
 
-Список indexing jobs.
+Список indexing jobs (опциональный фильтр `status`: `queued|running|completed|failed`).
 
 ### GET /api/retrieval/jobs/{job_id}
 
 Детали indexing job по id. Возвращает `404`, если job не найден.
+
+Примечание: при `process_now=false` в `/api/retrieval/index` job остаётся в `queued` до внешней обработки.

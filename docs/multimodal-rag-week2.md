@@ -11,8 +11,9 @@ Week 2 adds an indexing-jobs control plane for retrieval ingestion orchestration
   - `POST /api/retrieval/index`
   - `GET /api/retrieval/jobs`
   - `GET /api/retrieval/jobs/{job_id}`
-- Week-2 bootstrap behavior: indexing jobs complete synchronously with `status=completed`.
+- Week-2 bootstrap behavior: `process_now=true` processes jobs synchronously (`completed`), `process_now=false` leaves them in `queued`.
 - Retrieval search path remains backward-compatible (legacy by default, multimodal by feature flag/runtime injection).
+- Job payload includes telemetry fields: `started_at`, `completed_at`, `attempts`, `error`.
 
 ## Next (Week 3)
 

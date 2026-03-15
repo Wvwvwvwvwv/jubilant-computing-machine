@@ -64,22 +64,36 @@ def test_index_job_lifecycle_create_get_list():
 
     created = client.post(
         "/api/retrieval/index",
-        json={"source_type": "book", "source_ref": "book_123"},
+        json={"source_type": "book", "source_ref": "book_123", "process_now": True},
     )
     assert created.status_code == 200
     cdata = created.json()
     assert cdata["job_id"].startswith("rj_")
     assert cdata["status"] == "completed"
+    assert cdata["attempts"] == 1
 
     fetched = client.get(f"/api/retrieval/jobs/{cdata['job_id']}")
     assert fetched.status_code == 200
     assert fetched.json()["source_ref"] == "book_123"
 
-    listed = client.get("/api/retrieval/jobs", params={"limit": 10})
+    listed = client.get("/api/retrieval/jobs", params={"limit": 10, "status": "completed"})
     assert listed.status_code == 200
     ldata = listed.json()
     assert ldata["count"] == 1
     assert ldata["items"][0]["job_id"] == cdata["job_id"]
+
+
+def test_index_job_process_now_false_returns_queued():
+    client = make_client()
+
+    created = client.post(
+        "/api/retrieval/index",
+        json={"source_type": "book", "source_ref": "book_queued", "process_now": False},
+    )
+    assert created.status_code == 200
+    cdata = created.json()
+    assert cdata["status"] == "queued"
+    assert cdata["attempts"] == 0
 
 
 def test_get_index_job_returns_404_for_unknown_id():

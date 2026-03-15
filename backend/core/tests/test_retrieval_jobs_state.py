@@ -8,13 +8,30 @@ def test_create_and_get_job():
     fetched = state.get_job(job.job_id)
     assert fetched is not None
     assert fetched.job_id == job.job_id
-    assert fetched.status == "completed"
+    assert fetched.status == "queued"
 
 
-def test_list_jobs_respects_limit():
+def test_process_job_marks_completed_and_sets_timestamps():
+    state = RetrievalJobState()
+    job = state.create_index_job(source_type="manual", source_ref="ref_1")
+
+    processed = state.process_job(job.job_id)
+    assert processed is not None
+    assert processed.status == "completed"
+    assert processed.started_at is not None
+    assert processed.completed_at is not None
+    assert processed.attempts == 1
+
+
+def test_list_jobs_respects_limit_and_status_filter():
     state = RetrievalJobState()
     for i in range(5):
         state.create_index_job(source_type="manual", source_ref=f"ref_{i}")
+
+    state.process_job(state.list_jobs(limit=1)[0].job_id)
+
+    queued = state.list_jobs(limit=10, status="queued")
+    assert all(x.status == "queued" for x in queued)
 
     jobs = state.list_jobs(limit=3)
     assert len(jobs) == 3
