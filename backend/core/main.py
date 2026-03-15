@@ -1,4 +1,6 @@
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
+import asyncio
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +15,20 @@ from backend.core.services.voice_state import VoiceState
 from backend.core.services.retrieval_jobs import RetrievalJobState
 
 
+WORKER_INTERVAL_SECONDS = float(os.getenv("RETRIEVAL_WORKER_INTERVAL_SECONDS", "0.5"))
+WORKER_BATCH_SIZE = int(os.getenv("RETRIEVAL_WORKER_BATCH_SIZE", "10"))
+
+
+async def retrieval_worker_loop(job_state: RetrievalJobState, stop_event: asyncio.Event):
+    """Background worker that processes queued retrieval jobs."""
+    while not stop_event.is_set():
+        job_state.process_pending_jobs(max_jobs=WORKER_BATCH_SIZE)
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=WORKER_INTERVAL_SECONDS)
+        except asyncio.TimeoutError:
+            continue
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -25,10 +41,17 @@ async def lifespan(app: FastAPI):
     # Week-1 retrieval abstraction bootstrap: multimodal retriever can be injected later.
     app.state.multimodal_retriever = None
     app.state.retrieval_job_state = RetrievalJobState()
+    app.state.retrieval_worker_stop = asyncio.Event()
+    app.state.retrieval_worker_task = asyncio.create_task(
+        retrieval_worker_loop(app.state.retrieval_job_state, app.state.retrieval_worker_stop)
+    )
     await app.state.memory_engine.initialize()
     yield
     # Shutdown
     app.state.task_runner.save_state()
+    app.state.retrieval_worker_stop.set()
+    with suppress(asyncio.CancelledError):
+        await app.state.retrieval_worker_task
     await app.state.memory_engine.close()
 
 

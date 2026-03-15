@@ -91,3 +91,18 @@ class RetrievalJobState:
             if len(items) >= limit:
                 break
         return list(reversed(items))
+
+
+    def process_pending_jobs(self, max_jobs: int = 10) -> int:
+        """Process up to max_jobs queued items synchronously (week-3 worker bootstrap)."""
+        max_jobs = max(1, min(int(max_jobs), 1000))
+        processed = 0
+        for jid in list(self._job_ids):
+            if processed >= max_jobs:
+                break
+            job = self._jobs.get(jid)
+            if job is None or job.status != "queued":
+                continue
+            self.process_job(jid)
+            processed += 1
+        return processed

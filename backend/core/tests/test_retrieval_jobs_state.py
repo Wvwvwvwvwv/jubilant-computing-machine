@@ -46,3 +46,15 @@ def test_process_job_marks_failed_when_reason_provided():
     assert processed.status == "failed"
     assert processed.error == "bad parse"
     assert processed.attempts == 1
+
+
+def test_process_pending_jobs_processes_only_queued():
+    state = RetrievalJobState()
+    j1 = state.create_index_job(source_type="book", source_ref="a")
+    j2 = state.create_index_job(source_type="book", source_ref="b")
+    state.process_job(j1.job_id, fail_reason="bad")
+
+    processed = state.process_pending_jobs(max_jobs=10)
+    assert processed == 1
+    assert state.get_job(j1.job_id).status == "failed"
+    assert state.get_job(j2.job_id).status == "completed"

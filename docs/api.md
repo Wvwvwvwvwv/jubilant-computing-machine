@@ -730,3 +730,5 @@ Base URL: `http://localhost:8000`
 
 - Если `fail_reason` задан, job завершится со статусом `failed` и полем `error`.
 - Если `fail_reason` не задан, job перейдёт в `completed`.
+
+- Фоновый worker может автоматически обрабатывать `queued` jobs (интервал/батч настраиваются через `RETRIEVAL_WORKER_INTERVAL_SECONDS` и `RETRIEVAL_WORKER_BATCH_SIZE`).
