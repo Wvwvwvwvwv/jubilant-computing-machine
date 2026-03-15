@@ -96,8 +96,49 @@ def test_index_job_process_now_false_returns_queued():
     assert cdata["attempts"] == 0
 
 
+
+def test_process_index_job_endpoint_transitions_to_completed():
+    client = make_client()
+
+    created = client.post(
+        "/api/retrieval/index",
+        json={"source_type": "book", "source_ref": "book_manual", "process_now": False},
+    )
+    assert created.status_code == 200
+    job_id = created.json()["job_id"]
+
+    processed = client.post(f"/api/retrieval/jobs/{job_id}/process", json={})
+    assert processed.status_code == 200
+    pdata = processed.json()
+    assert pdata["status"] == "completed"
+    assert pdata["attempts"] == 1
+
+
+def test_process_index_job_endpoint_can_mark_failed():
+    client = make_client()
+
+    created = client.post(
+        "/api/retrieval/index",
+        json={"source_type": "book", "source_ref": "book_fail", "process_now": False},
+    )
+    assert created.status_code == 200
+    job_id = created.json()["job_id"]
+
+    processed = client.post(f"/api/retrieval/jobs/{job_id}/process", json={"fail_reason": "parse error"})
+    assert processed.status_code == 200
+    pdata = processed.json()
+    assert pdata["status"] == "failed"
+    assert pdata["error"] == "parse error"
+
+
 def test_get_index_job_returns_404_for_unknown_id():
     client = make_client()
     response = client.get("/api/retrieval/jobs/rj_missing")
     assert response.status_code == 404
     assert "index job not found" in response.json()["detail"]
+
+
+def test_process_index_job_returns_404_for_unknown_id():
+    client = make_client()
+    response = client.post("/api/retrieval/jobs/rj_missing/process", json={})
+    assert response.status_code == 404

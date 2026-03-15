@@ -45,6 +45,10 @@ class RetrievalJobsListResponse(BaseModel):
     count: int
 
 
+class RetrievalProcessJobRequest(BaseModel):
+    fail_reason: str | None = Field(default=None, max_length=4000)
+
+
 @router.get("/health")
 async def retrieval_health(req: Request):
     mm_retriever = getattr(req.app.state, "multimodal_retriever", None)
@@ -91,6 +95,15 @@ async def list_index_jobs(req: Request, limit: int = 20, status: JobStatus | Non
 async def get_index_job(job_id: str, req: Request):
     job_state: RetrievalJobState = req.app.state.retrieval_job_state
     job = job_state.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="index job not found")
+    return RetrievalIndexJobResponse(**job.__dict__)
+
+
+@router.post("/jobs/{job_id}/process", response_model=RetrievalIndexJobResponse)
+async def process_index_job(job_id: str, body: RetrievalProcessJobRequest, req: Request):
+    job_state: RetrievalJobState = req.app.state.retrieval_job_state
+    job = job_state.process_job(job_id, fail_reason=body.fail_reason)
     if job is None:
         raise HTTPException(status_code=404, detail="index job not found")
     return RetrievalIndexJobResponse(**job.__dict__)

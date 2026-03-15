@@ -715,3 +715,18 @@ Base URL: `http://localhost:8000`
 Детали indexing job по id. Возвращает `404`, если job не найден.
 
 Примечание: при `process_now=false` в `/api/retrieval/index` job остаётся в `queued` до внешней обработки.
+
+
+### POST /api/retrieval/jobs/{job_id}/process
+
+Ручная обработка indexing job (week-2 bootstrap processing).
+
+**Request:**
+```json
+{
+  "fail_reason": null
+}
+```
+
+- Если `fail_reason` задан, job завершится со статусом `failed` и полем `error`.
+- Если `fail_reason` не задан, job перейдёт в `completed`.

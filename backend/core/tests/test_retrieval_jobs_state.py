@@ -36,3 +36,13 @@ def test_list_jobs_respects_limit_and_status_filter():
     jobs = state.list_jobs(limit=3)
     assert len(jobs) == 3
     assert jobs[-1].source_ref == "ref_4"
+
+
+def test_process_job_marks_failed_when_reason_provided():
+    state = RetrievalJobState()
+    job = state.create_index_job(source_type="file", source_ref="f1")
+    processed = state.process_job(job.job_id, fail_reason="bad parse")
+    assert processed is not None
+    assert processed.status == "failed"
+    assert processed.error == "bad parse"
+    assert processed.attempts == 1
