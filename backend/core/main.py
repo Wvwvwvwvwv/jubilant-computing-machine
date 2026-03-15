@@ -21,6 +21,8 @@ async def lifespan(app: FastAPI):
     app.state.companion_state = CompanionState()
     app.state.companion_memory = CompanionMemory()
     app.state.voice_state = VoiceState()
+    # Week-1 retrieval abstraction bootstrap: multimodal retriever can be injected later.
+    app.state.multimodal_retriever = None
     await app.state.memory_engine.initialize()
     yield
     # Shutdown

@@ -47,6 +47,8 @@ Base URL: `http://localhost:8000`
 }
 ```
 
+> Week 1 retrieval rollout: `POST /api/chat` can use either `legacy` memory retrieval (default) or a multimodal retriever when `MULTIMODAL_RAG_ENABLED=1` and backend runtime injects `app.state.multimodal_retriever`.
+
 ### Memory Endpoints
 
 #### POST /api/memory/search

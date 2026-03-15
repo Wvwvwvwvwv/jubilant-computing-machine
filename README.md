@@ -155,6 +155,7 @@ data/            - Персистентные данные
 - [Handoff v2](docs/handoff-v2.md)
 - [Companion Vision (STABLE/WILD, personality, voice)](docs/companion-vision.md)
 - [Companion Implementation Plan (API + DB + Voice Go/No-Go)](docs/companion-implementation-plan.md)
+- [Multimodal RAG Week 1 Plan](docs/multimodal-rag-week1.md)
 
 ## Backend dependency management
 

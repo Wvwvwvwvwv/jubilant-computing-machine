@@ -8,6 +8,7 @@ from backend.core.services.companion_memory import CompanionMemory
 from backend.core.services.companion_state import CompanionState
 from backend.core.services.kobold_client import KoboldClient
 from backend.core.services.memory_engine import MemoryEngine
+from backend.core.services.retrieval import LegacyMemoryRetriever, multimodal_rag_enabled
 
 router = APIRouter()
 kobold = KoboldClient()
@@ -123,6 +124,18 @@ def build_relationship_memory_message(facts: list[dict]) -> ChatMessage:
     )
 
 
+
+
+async def search_memory_context(req: Request, memory_engine: MemoryEngine, query_text: str, limit: int = 8) -> tuple[list[dict], str]:
+    """Resolve active retriever backend (legacy by default, multimodal by flag)."""
+    if multimodal_rag_enabled():
+        mm_retriever = getattr(req.app.state, "multimodal_retriever", None)
+        if mm_retriever is not None and hasattr(mm_retriever, "search"):
+            return await mm_retriever.search(query_text, limit=limit), "multimodal"
+
+    legacy_retriever = LegacyMemoryRetriever(memory_engine)
+    return await legacy_retriever.search(query_text, limit=limit), "legacy"
+
 def infer_uncertainty_markers(text: str) -> list[str]:
     lowered = (text or "").lower()
     markers = []
@@ -147,6 +160,7 @@ async def chat(request: ChatRequest, req: Request):
 
     context_items = 0
     memory_context = []
+    retrieval_backend = "legacy"
     query_text = request.messages[-1].content
     working_messages = list(request.messages)
     used_relationship_ids: list[str] = []
@@ -166,7 +180,7 @@ async def chat(request: ChatRequest, req: Request):
 
     # Получение релевантного контекста из памяти
     if request.use_memory:
-        memory_context = await memory_engine.search(query_text, limit=8)
+        memory_context, retrieval_backend = await search_memory_context(req, memory_engine, query_text, limit=8)
 
         # Добавление контекста в промпт
         if memory_context:
@@ -176,7 +190,7 @@ async def chat(request: ChatRequest, req: Request):
             if context_text:
                 system_msg = ChatMessage(
                     role="system",
-                    content=f"Релевантный контекст из памяти:\n{context_text}",
+                    content=f"Релевантный контекст из памяти ({retrieval_backend}):\n{context_text}",
                 )
                 working_messages.insert(-1, system_msg)
                 context_items = context_text.count("[Память ")
