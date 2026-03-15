@@ -138,9 +138,11 @@ Base URL: `http://localhost:8000`
   "id": "abc123",
   "filename": "book.txt",
   "size": 102400,
-  "status": "uploaded"
+  "status": "uploaded",
+  "retrieval_job_id": "rj_abc123"
 }
 ```
+- `retrieval_job_id` может быть `null`, если retrieval job state не инициализирован.
 
 #### GET /api/books/list
 

@@ -18,4 +18,4 @@ Week 2 adds an indexing-jobs control plane for retrieval ingestion orchestration
 
 - Introduce asynchronous workers for actual document indexing.
 - Add job progress (`queued/running/completed/failed`) and error telemetry.
-- Connect `books/upload` pipeline to `retrieval/index` enqueue path.
+- ✅ Connect `books/upload` pipeline to retrieval index enqueue path (`retrieval_job_id` in upload response).
