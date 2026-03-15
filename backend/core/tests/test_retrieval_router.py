@@ -191,3 +191,22 @@ def test_worker_status_and_control_endpoints():
     resumed = client.post("/api/retrieval/worker/control", json={"paused": False})
     assert resumed.status_code == 200
     assert resumed.json()["paused"] is False
+
+
+def test_worker_run_once_processes_queued_jobs():
+    client = make_client()
+
+    c1 = client.post("/api/retrieval/index", json={"source_type": "book", "source_ref": "q1", "process_now": False})
+    c2 = client.post("/api/retrieval/index", json={"source_type": "book", "source_ref": "q2", "process_now": False})
+    assert c1.status_code == 200 and c2.status_code == 200
+
+    run_once = client.post("/api/retrieval/worker/run-once", params={"max_jobs": 1})
+    assert run_once.status_code == 200
+    rdata = run_once.json()
+    assert rdata["processed"] == 1
+    assert rdata["queue_depth"] == 1
+
+    run_once_2 = client.post("/api/retrieval/worker/run-once", params={"max_jobs": 10})
+    assert run_once_2.status_code == 200
+    assert run_once_2.json()["processed"] == 1
+    assert run_once_2.json()["queue_depth"] == 0

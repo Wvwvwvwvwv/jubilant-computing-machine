@@ -69,6 +69,11 @@ class RetrievalWorkerControlRequest(BaseModel):
     paused: bool
 
 
+class RetrievalWorkerRunOnceResponse(BaseModel):
+    processed: int
+    queue_depth: int
+
+
 @router.get("/health")
 async def retrieval_health(req: Request):
     mm_retriever = getattr(req.app.state, "multimodal_retriever", None)
@@ -154,3 +159,11 @@ async def control_retrieval_worker(body: RetrievalWorkerControlRequest, req: Req
     interval_seconds = float(getattr(req.app.state, "retrieval_worker_interval_seconds", 0.5))
     batch_size = int(getattr(req.app.state, "retrieval_worker_batch_size", 10))
     return RetrievalWorkerStatusResponse(paused=pause_event.is_set(), interval_seconds=interval_seconds, batch_size=batch_size)
+
+
+@router.post("/worker/run-once", response_model=RetrievalWorkerRunOnceResponse)
+async def run_retrieval_worker_once(req: Request, max_jobs: int = 10):
+    job_state: RetrievalJobState = req.app.state.retrieval_job_state
+    processed = job_state.process_pending_jobs(max_jobs=max_jobs)
+    metrics = job_state.get_metrics()
+    return RetrievalWorkerRunOnceResponse(processed=processed, queue_depth=metrics["queue_depth"])

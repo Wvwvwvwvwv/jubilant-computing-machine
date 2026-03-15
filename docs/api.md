@@ -756,3 +756,25 @@ Base URL: `http://localhost:8000`
   "paused": true
 }
 ```
+
+
+### POST /api/retrieval/worker/run-once?max_jobs=10
+
+Ручной единичный прогон retrieval worker для локальной отладки.
+
+**Response:**
+```json
+{
+  "processed": 3,
+  "queue_depth": 7
+}
+```
+
+
+## Week 3 quick usage (простыми словами)
+
+1. Загружаете файл через `POST /api/books/upload` — появится `retrieval_job_id`.
+2. Проверяете очередь через `GET /api/retrieval/worker-metrics` (`queue_depth`).
+3. Если нужно временно остановить автопроцессинг: `POST /api/retrieval/worker/control` с `{"paused": true}`.
+4. Хотите вручную обработать часть очереди: `POST /api/retrieval/worker/run-once?max_jobs=5`.
+5. Включаете автопроцессинг обратно: `POST /api/retrieval/worker/control` с `{"paused": false}`.
