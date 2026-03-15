@@ -112,6 +112,17 @@ bash termux/cleanup-memory-noise.sh
 bash termux/cleanup-memory-noise.sh --apply
 ```
 
+
+### Единая полная проверка (end-to-end)
+```bash
+cd ~/roampal-android
+bash scripts/full-end-to-end-check.sh
+```
+
+Этот скрипт запускается из корня репозитория и выполняет:
+- быструю проверку синтаксиса ключевых backend-модулей;
+- единый интеграционный smoke-тест `backend/core/tests/test_full_system_check.py`.
+
 ### 5. Автоматическое развертывание (рекомендуется)
 ```bash
 curl -sSL https://raw.githubusercontent.com/Wvwvwvwvwv/jubilant-computing-machine/main/termux/deploy.sh | bash -s -- work

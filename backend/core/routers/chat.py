@@ -51,8 +51,16 @@ def trim_chat_history(messages: List[ChatMessage], max_messages: int = MAX_CHAT_
     return [*system_msgs, *keep_non_system]
 
 
-def build_memory_context_block(items: list[dict], limit: int = MAX_MEMORY_CONTEXT_ITEMS) -> str:
-    """Deduplicate noisy memory items and keep only compact relevant snippets."""
+def _insertion_index_before_last_user(messages: List[ChatMessage]) -> int:
+    """Insert context right before the latest user turn; fallback to append."""
+    for idx in range(len(messages) - 1, -1, -1):
+        if messages[idx].role == "user":
+            return idx
+    return len(messages)
+
+
+def build_memory_context_items(items: list[dict], limit: int = MAX_MEMORY_CONTEXT_ITEMS) -> list[str]:
+    """Return compact, deduplicated memory snippets suitable for prompt injection."""
     filtered: list[str] = []
     seen: set[str] = set()
     for item in items:
@@ -69,6 +77,12 @@ def build_memory_context_block(items: list[dict], limit: int = MAX_MEMORY_CONTEX
         filtered.append(raw[:500])
         if len(filtered) >= limit:
             break
+    return filtered
+
+
+def build_memory_context_block(items: list[dict], limit: int = MAX_MEMORY_CONTEXT_ITEMS) -> str:
+    """Deduplicate noisy memory items and keep only compact relevant snippets."""
+    filtered = build_memory_context_items(items, limit=limit)
 
     return "\n\n".join([f"[Память {i + 1}]: {text}" for i, text in enumerate(filtered)])
 
@@ -164,6 +178,7 @@ async def chat(request: ChatRequest, req: Request):
     query_text = request.messages[-1].content
     working_messages = list(request.messages)
     used_relationship_ids: list[str] = []
+    active_kobold: KoboldClient = getattr(req.app.state, "kobold_client", kobold)
 
     # Companion behavior policy injection (mode/challenge)
     if companion_state is not None:
@@ -184,7 +199,8 @@ async def chat(request: ChatRequest, req: Request):
 
         # Добавление контекста в промпт
         if memory_context:
-            context_text = build_memory_context_block(memory_context, limit=MAX_MEMORY_CONTEXT_ITEMS)
+            filtered_context_items = build_memory_context_items(memory_context, limit=MAX_MEMORY_CONTEXT_ITEMS)
+            context_text = "\n\n".join([f"[Память {i + 1}]: {text}" for i, text in enumerate(filtered_context_items)])
 
             # Вставка контекста перед последним сообщением
             if context_text:
@@ -192,14 +208,15 @@ async def chat(request: ChatRequest, req: Request):
                     role="system",
                     content=f"Релевантный контекст из памяти ({retrieval_backend}):\n{context_text}",
                 )
-                working_messages.insert(-1, system_msg)
-                context_items = context_text.count("[Память ")
+                insertion_index = _insertion_index_before_last_user(working_messages)
+                working_messages.insert(insertion_index, system_msg)
+                context_items = len(filtered_context_items)
 
     working_messages = trim_chat_history(working_messages)
 
     # Отправка в KoboldCpp
     try:
-        response = await kobold.generate(
+        response = await active_kobold.generate(
             messages=serialize_messages(working_messages),
             max_tokens=request.max_tokens,
             temperature=request.temperature,

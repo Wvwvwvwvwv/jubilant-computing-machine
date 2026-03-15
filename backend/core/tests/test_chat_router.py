@@ -5,8 +5,10 @@ from backend.core.routers import chat as chat_router
 from backend.core.routers.chat import (
     ChatMessage,
     build_memory_context_block,
+    build_memory_context_items,
     build_companion_behavior_message,
     build_relationship_memory_message,
+    _insertion_index_before_last_user,
     serialize_messages,
     trim_chat_history,
 )
@@ -89,6 +91,29 @@ def test_build_memory_context_block_deduplicates_and_filters_noise():
     assert "System: Answer to" not in block
     assert block.count("Расскажи о себе") == 1
     assert "Полезный факт" in block
+
+
+def test_build_memory_context_items_returns_countable_filtered_list():
+    items = build_memory_context_items(
+        [
+            {"content": "Q: Привет"},
+            {"content": "Q: Привет"},
+            {"content": "System: Answer to previous"},
+            {"content": "Факт 2"},
+        ],
+        limit=3,
+    )
+    assert items == ["Q: Привет", "Факт 2"]
+
+
+def test_insertion_index_before_last_user_finds_latest_user_turn():
+    messages = [
+        ChatMessage(role="system", content="s"),
+        ChatMessage(role="assistant", content="a1"),
+        ChatMessage(role="user", content="u1"),
+        ChatMessage(role="assistant", content="a2"),
+    ]
+    assert _insertion_index_before_last_user(messages) == 2
 
 
 def test_trim_chat_history_preserves_system_and_keeps_recent_non_system():
