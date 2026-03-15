@@ -10,6 +10,7 @@ from backend.core.services.task_runner import TaskRunner
 from backend.core.services.companion_state import CompanionState
 from backend.core.services.companion_memory import CompanionMemory
 from backend.core.services.voice_state import VoiceState
+from backend.core.services.retrieval_jobs import RetrievalJobState
 
 
 @asynccontextmanager
@@ -23,6 +24,7 @@ async def lifespan(app: FastAPI):
     app.state.voice_state = VoiceState()
     # Week-1 retrieval abstraction bootstrap: multimodal retriever can be injected later.
     app.state.multimodal_retriever = None
+    app.state.retrieval_job_state = RetrievalJobState()
     await app.state.memory_engine.initialize()
     yield
     # Shutdown

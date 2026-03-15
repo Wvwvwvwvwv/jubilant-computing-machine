@@ -24,6 +24,6 @@ Week 1 introduces a safe retrieval abstraction layer without breaking existing c
 
 ## Next (Week 2)
 
-- Add indexing jobs API.
+- ✅ Add indexing jobs API (completed in Week 2).
 - Implement first concrete multimodal retriever adapter.
 - Add retrieval explainability fields to companion traces.

@@ -1,10 +1,11 @@
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from backend.core.services.memory_engine import MemoryEngine
 from backend.core.services.retrieval import multimodal_rag_enabled, search_with_backend
+from backend.core.services.retrieval_jobs import RetrievalJobState
 
 router = APIRouter()
 
@@ -18,6 +19,26 @@ class RetrievalSearchResponse(BaseModel):
     backend: str
     count: int
     results: list[dict[str, Any]]
+
+
+class RetrievalIndexRequest(BaseModel):
+    source_type: Literal["book", "file", "url", "manual"]
+    source_ref: str = Field(..., min_length=1, max_length=4000)
+
+
+class RetrievalIndexJobResponse(BaseModel):
+    job_id: str
+    source_type: str
+    source_ref: str
+    status: str
+    created_at: float
+    updated_at: float
+    error: str | None = None
+
+
+class RetrievalJobsListResponse(BaseModel):
+    items: list[RetrievalIndexJobResponse]
+    count: int
 
 
 @router.get("/health")
@@ -43,3 +64,27 @@ async def retrieval_search(body: RetrievalSearchRequest, req: Request):
     )
 
     return RetrievalSearchResponse(backend=backend, count=len(results), results=results)
+
+
+@router.post("/index", response_model=RetrievalIndexJobResponse)
+async def create_index_job(body: RetrievalIndexRequest, req: Request):
+    job_state: RetrievalJobState = req.app.state.retrieval_job_state
+    job = job_state.create_index_job(source_type=body.source_type, source_ref=body.source_ref)
+    return RetrievalIndexJobResponse(**job.__dict__)
+
+
+@router.get("/jobs", response_model=RetrievalJobsListResponse)
+async def list_index_jobs(req: Request, limit: int = 20):
+    job_state: RetrievalJobState = req.app.state.retrieval_job_state
+    jobs = job_state.list_jobs(limit=limit)
+    items = [RetrievalIndexJobResponse(**job.__dict__) for job in jobs]
+    return RetrievalJobsListResponse(items=items, count=len(items))
+
+
+@router.get("/jobs/{job_id}", response_model=RetrievalIndexJobResponse)
+async def get_index_job(job_id: str, req: Request):
+    job_state: RetrievalJobState = req.app.state.retrieval_job_state
+    job = job_state.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="index job not found")
+    return RetrievalIndexJobResponse(**job.__dict__)

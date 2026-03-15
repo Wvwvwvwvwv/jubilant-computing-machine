@@ -673,3 +673,37 @@ Base URL: `http://localhost:8000`
   ]
 }
 ```
+
+
+### POST /api/retrieval/index
+
+Создать indexing job (week-2 bootstrap).
+
+**Request:**
+```json
+{
+  "source_type": "book",
+  "source_ref": "book_123"
+}
+```
+
+**Response:**
+```json
+{
+  "job_id": "rj_abc123",
+  "source_type": "book",
+  "source_ref": "book_123",
+  "status": "completed",
+  "created_at": 1730000000.0,
+  "updated_at": 1730000000.0,
+  "error": null
+}
+```
+
+### GET /api/retrieval/jobs?limit=20
+
+Список indexing jobs.
+
+### GET /api/retrieval/jobs/{job_id}
+
+Детали indexing job по id. Возвращает `404`, если job не найден.

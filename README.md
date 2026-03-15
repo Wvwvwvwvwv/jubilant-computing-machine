@@ -156,6 +156,7 @@ data/            - Персистентные данные
 - [Companion Vision (STABLE/WILD, personality, voice)](docs/companion-vision.md)
 - [Companion Implementation Plan (API + DB + Voice Go/No-Go)](docs/companion-implementation-plan.md)
 - [Multimodal RAG Week 1 Plan](docs/multimodal-rag-week1.md)
+- [Multimodal RAG Week 2 Plan](docs/multimodal-rag-week2.md)
 
 ## Backend dependency management
 

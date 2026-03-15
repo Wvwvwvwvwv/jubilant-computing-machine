@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.core.routers import retrieval as retrieval_router
+from backend.core.services.retrieval_jobs import RetrievalJobState
 
 
 class FakeMemoryEngine:
@@ -19,6 +20,7 @@ def make_client(multimodal_retriever=None) -> TestClient:
     app.include_router(retrieval_router.router, prefix="/api/retrieval")
     app.state.memory_engine = FakeMemoryEngine()
     app.state.multimodal_retriever = multimodal_retriever
+    app.state.retrieval_job_state = RetrievalJobState()
     return TestClient(app)
 
 
@@ -55,3 +57,33 @@ def test_retrieval_search_uses_multimodal_when_enabled(monkeypatch):
     assert data["backend"] == "multimodal"
     assert data["count"] == 1
     assert data["results"][0]["id"] == "mm_1"
+
+
+def test_index_job_lifecycle_create_get_list():
+    client = make_client()
+
+    created = client.post(
+        "/api/retrieval/index",
+        json={"source_type": "book", "source_ref": "book_123"},
+    )
+    assert created.status_code == 200
+    cdata = created.json()
+    assert cdata["job_id"].startswith("rj_")
+    assert cdata["status"] == "completed"
+
+    fetched = client.get(f"/api/retrieval/jobs/{cdata['job_id']}")
+    assert fetched.status_code == 200
+    assert fetched.json()["source_ref"] == "book_123"
+
+    listed = client.get("/api/retrieval/jobs", params={"limit": 10})
+    assert listed.status_code == 200
+    ldata = listed.json()
+    assert ldata["count"] == 1
+    assert ldata["items"][0]["job_id"] == cdata["job_id"]
+
+
+def test_get_index_job_returns_404_for_unknown_id():
+    client = make_client()
+    response = client.get("/api/retrieval/jobs/rj_missing")
+    assert response.status_code == 404
+    assert "index job not found" in response.json()["detail"]
