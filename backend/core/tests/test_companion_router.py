@@ -226,6 +226,7 @@ def test_response_traces_history_endpoint(tmp_path):
     last = client.get('/api/companion/last-response-trace')
     assert last.status_code == 200
     assert last.json()['response_id'] == 'resp_2'
+    assert last.json()['retrieval_backend'] == 'legacy'
 
     history = client.get('/api/companion/response-traces', params={'limit': 10})
     assert history.status_code == 200
@@ -233,3 +234,5 @@ def test_response_traces_history_endpoint(tmp_path):
     assert data['count'] == 2
     assert data['items'][0]['response_id'] == 'resp_1'
     assert data['items'][1]['response_id'] == 'resp_2'
+    assert data['items'][0]['retrieval_backend'] == 'legacy'
+    assert data['items'][1]['retrieval_backend'] == 'legacy'

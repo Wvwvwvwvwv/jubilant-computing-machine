@@ -11,6 +11,7 @@ Week 1 introduces a safe retrieval abstraction layer without breaking existing c
 - Feature flag `MULTIMODAL_RAG_ENABLED` to switch retrieval backend in chat.
 - Runtime hook `app.state.multimodal_retriever` for future RAG-Anything adapter injection.
 - Chat context block now marks selected retrieval backend (`legacy` or `multimodal`).
+- Companion response traces include `retrieval_backend` for explainability/audit.
 
 ## Rollout Contract
 

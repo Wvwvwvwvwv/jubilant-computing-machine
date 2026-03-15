@@ -24,6 +24,7 @@ class CompanionSession:
 @dataclass
 class ResponseTrace:
     response_id: str
+    retrieval_backend: str
     reasoning_mode: ReasoningMode
     challenge_mode: ChallengeMode
     relationship_used: list[str]
@@ -74,6 +75,7 @@ class CompanionState:
     def set_last_trace(
         self,
         response_id: str,
+        retrieval_backend: str = "legacy",
         relationship_used: Optional[list[str]] = None,
         uncertainty_markers: Optional[list[str]] = None,
         counter_position_used: bool = False,
@@ -82,6 +84,7 @@ class CompanionState:
         sess = self._session
         trace = ResponseTrace(
             response_id=response_id,
+            retrieval_backend=retrieval_backend,
             reasoning_mode=sess.reasoning_mode,
             challenge_mode=sess.challenge_mode,
             relationship_used=relationship_used or [],

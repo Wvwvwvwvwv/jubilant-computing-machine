@@ -147,6 +147,7 @@ def test_chat_endpoint_writes_trace_and_injects_policy_and_relationship(monkeypa
     assert trace is not None
     assert trace.reasoning_mode == "wild"
     assert trace.challenge_mode == "balanced"
+    assert trace.retrieval_backend == "legacy"
     assert "insufficient_data" in trace.uncertainty_markers
     assert trace.counter_position_used is True
     assert trace.relationship_used == ["rf_1", "rf_2"]

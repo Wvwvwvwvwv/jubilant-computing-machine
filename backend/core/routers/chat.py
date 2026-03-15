@@ -218,6 +218,7 @@ async def chat(request: ChatRequest, req: Request):
             sess = companion_state.get_session()
             companion_state.set_last_trace(
                 response_id=f"resp_{uuid.uuid4().hex[:12]}",
+                retrieval_backend=retrieval_backend,
                 relationship_used=used_relationship_ids,
                 uncertainty_markers=infer_uncertainty_markers(response),
                 counter_position_used=(sess.challenge_mode != "off"),

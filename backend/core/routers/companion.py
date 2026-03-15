@@ -33,6 +33,7 @@ class CompanionSessionPatchRequest(BaseModel):
 
 class LastResponseTraceResponse(BaseModel):
     response_id: str
+    retrieval_backend: str
     reasoning_mode: ReasoningMode
     challenge_mode: ChallengeMode
     relationship_used: list[str]
