@@ -740,3 +740,19 @@ Base URL: `http://localhost:8000`
 - `queue_depth`, `running`, `completed`, `failed`
 - `processed_total`, `failed_total`
 - `last_processed_at`
+
+
+### GET /api/retrieval/worker/status
+
+Состояние retrieval worker (`paused`, `interval_seconds`, `batch_size`).
+
+### POST /api/retrieval/worker/control
+
+Управление worker паузой/возобновлением.
+
+**Request:**
+```json
+{
+  "paused": true
+}
+```

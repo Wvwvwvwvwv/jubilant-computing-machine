@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -21,6 +22,9 @@ def make_client(multimodal_retriever=None) -> TestClient:
     app.state.memory_engine = FakeMemoryEngine()
     app.state.multimodal_retriever = multimodal_retriever
     app.state.retrieval_job_state = RetrievalJobState()
+    app.state.retrieval_worker_pause = asyncio.Event()
+    app.state.retrieval_worker_interval_seconds = 0.5
+    app.state.retrieval_worker_batch_size = 10
     return TestClient(app)
 
 
@@ -170,3 +174,20 @@ def test_worker_metrics_endpoint_returns_counters():
     assert data["failed_total"] >= 1
     assert data["completed"] >= 1
     assert data["failed"] >= 1
+
+
+def test_worker_status_and_control_endpoints():
+    client = make_client()
+
+    status = client.get("/api/retrieval/worker/status")
+    assert status.status_code == 200
+    sdata = status.json()
+    assert sdata["paused"] is False
+
+    paused = client.post("/api/retrieval/worker/control", json={"paused": True})
+    assert paused.status_code == 200
+    assert paused.json()["paused"] is True
+
+    resumed = client.post("/api/retrieval/worker/control", json={"paused": False})
+    assert resumed.status_code == 200
+    assert resumed.json()["paused"] is False

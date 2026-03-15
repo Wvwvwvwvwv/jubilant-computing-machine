@@ -19,10 +19,11 @@ WORKER_INTERVAL_SECONDS = float(os.getenv("RETRIEVAL_WORKER_INTERVAL_SECONDS", "
 WORKER_BATCH_SIZE = int(os.getenv("RETRIEVAL_WORKER_BATCH_SIZE", "10"))
 
 
-async def retrieval_worker_loop(job_state: RetrievalJobState, stop_event: asyncio.Event):
+async def retrieval_worker_loop(job_state: RetrievalJobState, stop_event: asyncio.Event, pause_event: asyncio.Event):
     """Background worker that processes queued retrieval jobs."""
     while not stop_event.is_set():
-        job_state.process_pending_jobs(max_jobs=WORKER_BATCH_SIZE)
+        if not pause_event.is_set():
+            job_state.process_pending_jobs(max_jobs=WORKER_BATCH_SIZE)
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=WORKER_INTERVAL_SECONDS)
         except asyncio.TimeoutError:
@@ -42,8 +43,15 @@ async def lifespan(app: FastAPI):
     app.state.multimodal_retriever = None
     app.state.retrieval_job_state = RetrievalJobState()
     app.state.retrieval_worker_stop = asyncio.Event()
+    app.state.retrieval_worker_pause = asyncio.Event()
+    app.state.retrieval_worker_interval_seconds = WORKER_INTERVAL_SECONDS
+    app.state.retrieval_worker_batch_size = WORKER_BATCH_SIZE
     app.state.retrieval_worker_task = asyncio.create_task(
-        retrieval_worker_loop(app.state.retrieval_job_state, app.state.retrieval_worker_stop)
+        retrieval_worker_loop(
+            app.state.retrieval_job_state,
+            app.state.retrieval_worker_stop,
+            app.state.retrieval_worker_pause,
+        )
     )
     await app.state.memory_engine.initialize()
     yield

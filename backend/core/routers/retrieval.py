@@ -59,6 +59,16 @@ class RetrievalWorkerMetricsResponse(BaseModel):
     last_processed_at: float | None
 
 
+class RetrievalWorkerStatusResponse(BaseModel):
+    paused: bool
+    interval_seconds: float
+    batch_size: int
+
+
+class RetrievalWorkerControlRequest(BaseModel):
+    paused: bool
+
+
 @router.get("/health")
 async def retrieval_health(req: Request):
     mm_retriever = getattr(req.app.state, "multimodal_retriever", None)
@@ -123,3 +133,24 @@ async def process_index_job(job_id: str, body: RetrievalProcessJobRequest, req: 
 async def get_retrieval_worker_metrics(req: Request):
     job_state: RetrievalJobState = req.app.state.retrieval_job_state
     return RetrievalWorkerMetricsResponse(**job_state.get_metrics())
+
+
+@router.get("/worker/status", response_model=RetrievalWorkerStatusResponse)
+async def get_retrieval_worker_status(req: Request):
+    pause_event = req.app.state.retrieval_worker_pause
+    interval_seconds = float(getattr(req.app.state, "retrieval_worker_interval_seconds", 0.5))
+    batch_size = int(getattr(req.app.state, "retrieval_worker_batch_size", 10))
+    return RetrievalWorkerStatusResponse(paused=pause_event.is_set(), interval_seconds=interval_seconds, batch_size=batch_size)
+
+
+@router.post("/worker/control", response_model=RetrievalWorkerStatusResponse)
+async def control_retrieval_worker(body: RetrievalWorkerControlRequest, req: Request):
+    pause_event = req.app.state.retrieval_worker_pause
+    if body.paused:
+        pause_event.set()
+    else:
+        pause_event.clear()
+
+    interval_seconds = float(getattr(req.app.state, "retrieval_worker_interval_seconds", 0.5))
+    batch_size = int(getattr(req.app.state, "retrieval_worker_batch_size", 10))
+    return RetrievalWorkerStatusResponse(paused=pause_event.is_set(), interval_seconds=interval_seconds, batch_size=batch_size)
