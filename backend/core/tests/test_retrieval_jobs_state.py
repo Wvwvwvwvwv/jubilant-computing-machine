@@ -58,3 +58,19 @@ def test_process_pending_jobs_processes_only_queued():
     assert processed == 1
     assert state.get_job(j1.job_id).status == "failed"
     assert state.get_job(j2.job_id).status == "completed"
+
+
+def test_get_metrics_reports_queue_and_totals():
+    state = RetrievalJobState()
+    j1 = state.create_index_job(source_type="book", source_ref="m1")
+    j2 = state.create_index_job(source_type="book", source_ref="m2")
+    state.process_job(j1.job_id)
+    state.process_job(j2.job_id, fail_reason="oops")
+
+    metrics = state.get_metrics()
+    assert metrics["queue_depth"] == 0
+    assert metrics["completed"] == 1
+    assert metrics["failed"] == 1
+    assert metrics["processed_total"] == 2
+    assert metrics["failed_total"] == 1
+    assert metrics["last_processed_at"] is not None

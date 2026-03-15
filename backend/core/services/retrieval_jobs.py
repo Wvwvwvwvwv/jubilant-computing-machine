@@ -24,12 +24,15 @@ class RetrievalIndexJob:
 
 
 class RetrievalJobState:
-    """In-memory week-2 indexing jobs registry (bootstrap)."""
+    """In-memory retrieval indexing jobs registry (week-3 bootstrap)."""
 
     def __init__(self):
         self._jobs: dict[str, RetrievalIndexJob] = {}
         self._job_ids: list[str] = []
         self._limit = 500
+        self._processed_total = 0
+        self._failed_total = 0
+        self._last_processed_at: float | None = None
 
     def create_index_job(self, source_type: str, source_ref: str) -> RetrievalIndexJob:
         now = time.time()
@@ -68,12 +71,17 @@ class RetrievalJobState:
             job.error = fail_reason
             job.completed_at = time.time()
             job.updated_at = job.completed_at
+            self._processed_total += 1
+            self._failed_total += 1
+            self._last_processed_at = job.updated_at
             return job
 
         job.status = "completed"
         job.error = None
         job.completed_at = time.time()
         job.updated_at = job.completed_at
+        self._processed_total += 1
+        self._last_processed_at = job.updated_at
         return job
 
     def get_job(self, job_id: str) -> Optional[RetrievalIndexJob]:
@@ -92,7 +100,6 @@ class RetrievalJobState:
                 break
         return list(reversed(items))
 
-
     def process_pending_jobs(self, max_jobs: int = 10) -> int:
         """Process up to max_jobs queued items synchronously (week-3 worker bootstrap)."""
         max_jobs = max(1, min(int(max_jobs), 1000))
@@ -106,3 +113,28 @@ class RetrievalJobState:
             self.process_job(jid)
             processed += 1
         return processed
+
+    def get_metrics(self) -> dict:
+        queued = 0
+        running = 0
+        completed = 0
+        failed = 0
+        for job in self._jobs.values():
+            if job.status == "queued":
+                queued += 1
+            elif job.status == "running":
+                running += 1
+            elif job.status == "completed":
+                completed += 1
+            elif job.status == "failed":
+                failed += 1
+
+        return {
+            "queue_depth": queued,
+            "running": running,
+            "completed": completed,
+            "failed": failed,
+            "processed_total": self._processed_total,
+            "failed_total": self._failed_total,
+            "last_processed_at": self._last_processed_at,
+        }

@@ -142,3 +142,31 @@ def test_process_index_job_returns_404_for_unknown_id():
     client = make_client()
     response = client.post("/api/retrieval/jobs/rj_missing/process", json={})
     assert response.status_code == 404
+
+
+def test_worker_metrics_endpoint_returns_counters():
+    client = make_client()
+
+    created_ok = client.post(
+        "/api/retrieval/index",
+        json={"source_type": "book", "source_ref": "m_ok", "process_now": True},
+    )
+    assert created_ok.status_code == 200
+
+    created_fail = client.post(
+        "/api/retrieval/index",
+        json={"source_type": "book", "source_ref": "m_fail", "process_now": False},
+    )
+    assert created_fail.status_code == 200
+    job_id = created_fail.json()["job_id"]
+
+    failed = client.post(f"/api/retrieval/jobs/{job_id}/process", json={"fail_reason": "boom"})
+    assert failed.status_code == 200
+
+    metrics = client.get("/api/retrieval/worker-metrics")
+    assert metrics.status_code == 200
+    data = metrics.json()
+    assert data["processed_total"] >= 2
+    assert data["failed_total"] >= 1
+    assert data["completed"] >= 1
+    assert data["failed"] >= 1
