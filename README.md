@@ -133,15 +133,13 @@ cd ~/roampal-android
 bash termux/verify-repo-integrity.sh ~/roampal-android work
 ```
 
-### Очистка памяти от технических/тестовых записей
+### Полная очистка памяти
 ```bash
 cd ~/roampal-android
-# сначала dry-run (показать кандидатов)
-bash termux/cleanup-memory-noise.sh
-
-# затем применить удаление
-bash termux/cleanup-memory-noise.sh --apply
+bash termux/reset-all-memory.sh
 ```
+
+Скрипт полностью очищает локальную память (`~/roampal-android/data/memory`) и companion-базу (`backend/core/logs/companion.db`). После выполнения перезапустите core-сервис.
 
 
 ### Единая полная проверка (end-to-end)

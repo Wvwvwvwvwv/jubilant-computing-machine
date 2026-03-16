@@ -54,7 +54,7 @@
 - `verify-repo-integrity.sh`
 - `voice-readiness-check.sh`
 - `check-no-internet-leak.sh`
-- `cleanup-memory-noise.sh`
+- `reset-all-memory.sh`
 - `scripts/full-end-to-end-check.sh`
 
 ## 3) Что ассистент уже умеет на текущем этапе
@@ -175,7 +175,7 @@
 
 ### termux
 - `termux/check-no-internet-leak.sh`
-- `termux/cleanup-memory-noise.sh`
+- `termux/reset-all-memory.sh`
 - `termux/constraints-termux.txt`
 - `termux/deploy.sh`
 - `termux/diagnose.sh`
