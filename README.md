@@ -154,6 +154,11 @@ bash scripts/full-end-to-end-check.sh
 - быструю проверку синтаксиса ключевых backend-модулей;
 - единый интеграционный smoke-тест `backend/core/tests/test_full_system_check.py`.
 
+После запуска формируются подробные артефакты в `logs/`:
+- `full-end-to-end-check-*.log` — полный лог выполнения;
+- `full-end-to-end-check-*.summary.txt` — краткий итог по шагам;
+- `full-end-to-end-check-*.json` — структурированный отчёт (удобно переслать).
+
 Если в окружении нет `pytest` (включая Poetry-окружение), скрипт автоматически установит минимальные test-зависимости (`pytest`, `python-multipart`, `aiofiles`) и затем запустит smoke-тест.
 
 ### 5. Автоматическое развертывание (рекомендуется)
