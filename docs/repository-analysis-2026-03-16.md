@@ -1,75 +1,90 @@
 # Репозиторный аудит (main vs work) — 2026-03-16
 
-## 1) Ветки и дельта
+## 1) Статус веток и дельта
 
-- `origin/main` указывает на commit `93f0259`.
-- `origin/work` указывает на commit `6916482`.
-- Между `main -> work`: `43` изменённых файлов, `+5789/-40` строк.
-- Локальная ветка `work` синхронизирована fast-forward до `origin/work`.
+- `origin/main` → `93f0259`.
+- `origin/work` → `35d7d74`.
+- `work` опережает `main` на **57 commit**.
+- Общая дельта `main..work`: **44 files changed, +5969 / -40**.
+- Локальный `HEAD` синхронизирован с `origin/work`.
 
 Ключевые направления изменений в `work` относительно `main`:
 - Добавлены модули **companion** (session/profile/facts/proposals/traces).
-- Добавлен **voice control-plane** (session lifecycle, mic verify, go/no-go).
-- Добавлен **retrieval контур** (search API, job queue, worker metrics/control/run-once).
+- Добавлен **voice control-plane** (session lifecycle, mic verification, go/no-go).
+- Добавлен **retrieval контур** (поиск, очередь индексации, worker metrics/control/run-once).
 - Добавлены **online tools** (web search + download, feature-flag).
-- Усилены Termux-скрипты и end-to-end проверки.
-- Существенно расширены backend тесты.
+- Существенно усилены Termux/ops сценарии (diagnose, readiness, integrity, e2e checks).
+- Расширен набор backend-тестов.
 
-## 2) Текущая архитектура (снимок work)
+## 2) Архитектура (снимок branch `work`)
 
 ### Backend (FastAPI)
-- Основной app инициализирует состояния: memory engine, task runner, companion/voice state, retrieval jobs + background worker.
-- Подключены роуты:
-  - `/api/chat`
-  - `/api/memory`
-  - `/api/books`
-  - `/api/sandbox`
-  - `/api/tasks`
-  - `/api/companion`
-  - `/api/voice`
-  - `/api/retrieval`
-  - `/api/online`
+Единый orchestrator поднимает и держит в `app.state`:
+- `MemoryEngine`
+- `TaskRunner` (SQLite persistence + event audit)
+- `CompanionState`
+- `CompanionMemory`
+- `VoiceState`
+- `RetrievalJobState`
+- фоновый worker для обработки retrieval jobs
 
-### Frontend (React + Vite)
-- Страницы: Chat, Memory, Sandbox, Tasks, Companion, Voice.
-- API-клиент расширен под companion/voice/retrieval/online функциональность.
+Подключённые API-префиксы:
+- `/api/chat`
+- `/api/memory`
+- `/api/books`
+- `/api/sandbox`
+- `/api/tasks`
+- `/api/companion`
+- `/api/voice`
+- `/api/retrieval`
+- `/api/online`
+
+### Frontend (React + Vite + TS)
+В UI доступны страницы:
+- Chat
+- Memory
+- Sandbox
+- Tasks
+- Companion
+- Voice
 
 ### Ops/Termux
-- Есть install/deploy/start/stop/diagnose/full-smoke/integrity сценарии.
-- Добавлены спец-скрипты:
-  - проверка сетевых утечек,
-  - очистка шумовой памяти,
-  - voice readiness-check,
-  - единый full end-to-end check.
+Есть полный набор скриптов lifecycle и диагностики:
+- `setup/deploy/start/stop/diagnose/full-smoke`
+- `verify-repo-integrity.sh`
+- `voice-readiness-check.sh`
+- `check-no-internet-leak.sh`
+- `cleanup-memory-noise.sh`
+- `scripts/full-end-to-end-check.sh`
 
-## 3) Что ассистент уже умеет (по коду work)
+## 3) Что ассистент уже умеет на текущем этапе
 
-1. Локальный чат с KoboldCpp + контекст памяти + optional web-контекст по префиксам `web:`/`search:`.
-2. Outcome-based память: добавление, поиск, удаление, статистика, feedback-петля.
-3. Загрузка книг/PDF и извлечение контента, включая OCR fallback цепочку.
-4. Task pipeline с риск-классификацией, approval-gate, fingerprint invalidation, retry policy, event-аудитом и SQLite-персистом.
-5. Sandbox выполнение кода с Android/Termux-совместимыми ограничениями.
-6. Companion API:
-   - режимы рассуждения/челленджа/инициативы,
-   - профиль отношений и факты,
-   - proposal lifecycle,
-   - explainability traces.
-7. Voice API:
-   - старт/стоп voice session,
-   - health/metrics,
-   - mic verification,
-   - go/no-go оценка готовности.
-8. Retrieval API:
-   - unified search,
-   - index jobs lifecycle,
-   - worker metrics/control/run-once.
-9. Online tools (по feature flag): web search и download в локальную папку.
+1. **Локальный чат с LLM** через KoboldCpp с памятью и компактной инъекцией контекста.
+2. **Companion-политики поведения**: STABLE/WILD + challenge-mode с trace explainability.
+3. **Память отношений**: facts/profile и учёт в генерации ответа.
+4. **Outcome-based memory loop**: add/search/delete/stats/feedback.
+5. **Книги/PDF ingestion** с OCR fallback-путём.
+6. **Task execution pipeline**: risk-level, approval gate, fingerprint invalidation, retry policy, event-аудит.
+7. **Sandbox execution** с Termux/Android-aware ограничениями.
+8. **Voice control-plane API**: start/stop, health, metrics, microphone verify, go/no-go.
+9. **Retrieval API**: unified search + индексирующие jobs + фоновый worker и управление им.
+10. **Online tools (feature-flag)**: web search + controlled download в локальную директорию.
 
-## 4) Полный инвентарь tracked файлов (work)
+## 4) Что изменилось относительно `main` (смысловой итог)
 
-Всего tracked файлов: **90**.
+`work` фактически превратился из «ядра чат+память+sandbox» в более полный локальный assistant-platform слой:
+- Added: companion subsystem.
+- Added: voice orchestration layer.
+- Added: retrieval jobs lifecycle + worker.
+- Added: online tools integration.
+- Added: дополнительные on-device readiness/integrity сценарии.
+- Added: существенно более широкое тестовое покрытие backend API.
 
-### Корень
+## 5) Полный инвентарь tracked-файлов в `work`
+
+Текущий tracked inventory: **91 файл**.
+
+### root
 - `.github/workflows/backend-tests.yml`
 - `.gitignore`
 - `LICENSE`
@@ -172,9 +187,9 @@
 - `termux/verify-repo-integrity.sh`
 - `termux/voice-readiness-check.sh`
 
-## 5) Выводы
+## 6) Выводы (для чата)
 
-- Ветка `work` значительно ушла вперёд по функциональности относительно `main` и уже содержит расширенную платформу ассистента (companion + voice + retrieval + online).
-- По backend-тестам состояние стабильное (полный локальный пакет тестов проходит).
-- По процессу синхронизации ветки: после fast-forward локальный `work` совпадает с `origin/work`.
-- На текущем этапе проект покрывает почти весь заявленный концепт локального Android-ассистента; ключевые open-item'ы остаются в плоскости on-device прогонов deploy/full-smoke и валидации OCR-окружения на конкретном устройстве.
+- `work` — текущий source-of-truth: там уже собран «расширенный» локальный ассистент с companion/voice/retrieval/online подсистемами.
+- Архитектурно проект перешёл от MVP к платформенному слою с наблюдаемостью, управляемыми state-машинами и ops-скриптами для on-device эксплуатации.
+- По коду и тестам backend состояние стабильное; риски остаются в runtime-плоскости конкретного устройства (Termux Python 3.13/ocr/toolchain).
+- Практический следующий шаг: on-device прогон `termux/deploy.sh work` + `termux/full-smoke.sh` с приложением полного лога.
