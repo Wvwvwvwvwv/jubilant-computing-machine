@@ -96,6 +96,18 @@ bash termux/diagnose.sh
 ```
 
 
+### Проверка, что модель не выходит в интернет
+```bash
+cd ~/roampal-android
+bash termux/check-no-internet-leak.sh
+
+# строгий режим (exit code != 0 при подозрительных внешних соединениях)
+STRICT=1 bash termux/check-no-internet-leak.sh
+```
+
+Скрипт делает preflight локальных endpoint-ов и снимает snapshot сокетов (`ss -tpn`) во время chat-запроса.
+Отчёты сохраняются в `logs/net-leak-report-*.json` и `logs/net-sockets-*.log`.
+
 ### Проверка целостности репозитория (GitHub/ветка)
 ```bash
 cd ~/roampal-android
