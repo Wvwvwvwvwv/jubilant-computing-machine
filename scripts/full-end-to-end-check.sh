@@ -6,25 +6,38 @@ cd "$ROOT_DIR"
 
 export PYTHONPATH="${PYTHONPATH:-.}"
 
+TARGET_TEST="backend/core/tests/test_full_system_check.py"
+
 run_pytest() {
+  # Prefer Poetry env when available, but self-heal if pytest is missing there.
   if command -v poetry >/dev/null 2>&1; then
-    poetry run pytest -q backend/core/tests/test_full_system_check.py
+    if poetry run python -c "import pytest" >/dev/null 2>&1; then
+      poetry run python -m pytest -q "$TARGET_TEST"
+      return
+    fi
+
+    echo "[warn] pytest is missing in Poetry environment; installing minimal test deps..."
+    poetry run python -m pip install -q pytest python-multipart aiofiles
+    poetry run python -m pytest -q "$TARGET_TEST"
     return
   fi
 
+  # Global pytest command
   if command -v pytest >/dev/null 2>&1; then
-    pytest -q backend/core/tests/test_full_system_check.py
+    pytest -q "$TARGET_TEST"
     return
   fi
 
+  # Module execution path
   if python -c "import pytest" >/dev/null 2>&1; then
-    python -m pytest -q backend/core/tests/test_full_system_check.py
+    python -m pytest -q "$TARGET_TEST"
     return
   fi
 
-  echo "[error] pytest is not available (no pytest/poetry/python -m pytest path found)." >&2
-  echo "[hint] Install test dependencies, e.g. 'pip install pytest' or use Poetry env." >&2
-  exit 127
+  # Last-resort self-heal for environments without pytest preinstalled.
+  echo "[warn] pytest is not available; installing minimal test deps in current Python..."
+  python -m pip install -q pytest python-multipart aiofiles
+  python -m pytest -q "$TARGET_TEST"
 }
 
 python -m py_compile \

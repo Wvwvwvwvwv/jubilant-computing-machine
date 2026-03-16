@@ -154,7 +154,7 @@ bash scripts/full-end-to-end-check.sh
 - быструю проверку синтаксиса ключевых backend-модулей;
 - единый интеграционный smoke-тест `backend/core/tests/test_full_system_check.py`.
 
-Если в окружении нет глобальной команды `pytest`, скрипт автоматически попробует `poetry run pytest` и затем `python -m pytest`.
+Если в окружении нет `pytest` (включая Poetry-окружение), скрипт автоматически установит минимальные test-зависимости (`pytest`, `python-multipart`, `aiofiles`) и затем запустит smoke-тест.
 
 ### 5. Автоматическое развертывание (рекомендуется)
 ```bash
