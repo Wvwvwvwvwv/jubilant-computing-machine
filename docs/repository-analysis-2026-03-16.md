@@ -3,10 +3,10 @@
 ## 1) Статус веток и дельта
 
 - `origin/main` → `93f0259`.
-- `origin/work` → `35d7d74`.
-- `work` опережает `main` на **57 commit**.
-- Общая дельта `main..work`: **44 files changed, +5969 / -40**.
-- Локальный `HEAD` синхронизирован с `origin/work`.
+- `origin/work` → `e5986c1`.
+- `work` опережает `main` на **59 commit**.
+- Общая дельта `main..work`: **44 files changed, +6080 / -40**.
+- Локальный `HEAD` синхронизирован с `origin/work` (head parity подтверждён integrity-проверкой).
 
 Ключевые направления изменений в `work` относительно `main`:
 - Добавлены модули **companion** (session/profile/facts/proposals/traces).
@@ -187,7 +187,22 @@
 - `termux/verify-repo-integrity.sh`
 - `termux/voice-readiness-check.sh`
 
-## 6) Выводы (для чата)
+## 6) Подтверждённые on-device прогоны (Termux, 2026-03-16)
+
+На устройстве зафиксированы успешные эксплуатационные проверки:
+- Перезапуск всех сервисов (`koboldcpp`, `embeddings`, `core`, `frontend`) завершён успешно.
+- `termux/full-smoke.sh` прошёл все этапы: health/chat/memory/sandbox/tasks, включая drift-case в tasks.
+- `termux/deploy.sh work` завершился успешно и записал `last good commit = e5986c171c052b47993bd045f94d5ec8520b859f`.
+- `scripts/full-end-to-end-check.sh` выдал PASS:
+  - `py_compile`: pass
+  - `pytest` (`backend/core/tests/test_full_system_check.py`): pass (`1 passed`)
+
+Практическое значение:
+- Базовый runtime-контур проекта подтверждён на реальном Termux-окружении,
+  а не только локальными unit/integration тестами в dev-контейнере.
+- Smoke/Deploy/E2E цепочка рабочая в целевом Android-сценарии.
+
+## 7) Выводы (для чата)
 
 - `work` — текущий source-of-truth: там уже собран «расширенный» локальный ассистент с companion/voice/retrieval/online подсистемами.
 - Архитектурно проект перешёл от MVP к платформенному слою с наблюдаемостью, управляемыми state-машинами и ops-скриптами для on-device эксплуатации.
