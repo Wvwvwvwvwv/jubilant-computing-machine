@@ -9,6 +9,8 @@ from backend.core.routers.chat import (
     build_companion_behavior_message,
     build_relationship_memory_message,
     _insertion_index_before_last_user,
+    _online_search_triggered,
+    build_online_context,
     serialize_messages,
     trim_chat_history,
 )
@@ -197,3 +199,37 @@ def test_chat_endpoint_works_without_trailing_slash(monkeypatch):
         follow_redirects=False,
     )
     assert response.status_code == 200
+
+
+def test_online_search_triggered_prefixes():
+    assert _online_search_triggered("web: latest ai news") is True
+    assert _online_search_triggered("search: python httpx") is True
+    assert _online_search_triggered("привет") is False
+
+
+def test_build_online_context_disabled(monkeypatch):
+    monkeypatch.setenv("ENABLE_ONLINE_TOOLS", "0")
+
+    async def fake_web_search(query: str, limit: int = 3):
+        return [{"title": "t", "snippet": "s", "url": "u"}]
+
+    monkeypatch.setattr(chat_router, "web_search", fake_web_search)
+
+    import asyncio
+    result = asyncio.run(build_online_context("web: test"))
+    assert result == ""
+
+
+def test_build_online_context_enabled(monkeypatch):
+    monkeypatch.setenv("ENABLE_ONLINE_TOOLS", "1")
+
+    async def fake_web_search(query: str, limit: int = 3):
+        assert query == "weather moscow"
+        return [{"title": "Result", "snippet": "Now", "url": "https://example.com"}]
+
+    monkeypatch.setattr(chat_router, "web_search", fake_web_search)
+
+    import asyncio
+    result = asyncio.run(build_online_context("web: weather moscow"))
+    assert "Result" in result
+    assert "https://example.com" in result

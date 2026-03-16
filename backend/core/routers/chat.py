@@ -9,6 +9,7 @@ from backend.core.services.companion_state import CompanionState
 from backend.core.services.kobold_client import KoboldClient
 from backend.core.services.memory_engine import MemoryEngine
 from backend.core.services.retrieval import search_with_backend
+from backend.core.services.online_tools import online_tools_enabled, web_search
 
 router = APIRouter()
 kobold = KoboldClient()
@@ -150,6 +151,34 @@ async def search_memory_context(req: Request, memory_engine: MemoryEngine, query
         multimodal_retriever=mm_retriever,
     )
 
+
+
+def _online_search_triggered(text: str) -> bool:
+    lowered = (text or "").strip().lower()
+    return lowered.startswith("web:") or lowered.startswith("search:")
+
+
+async def build_online_context(query_text: str) -> str:
+    if not online_tools_enabled() or not _online_search_triggered(query_text):
+        return ""
+
+    cleaned = query_text.split(":", 1)[1].strip() if ":" in query_text else query_text
+    if not cleaned:
+        return ""
+
+    results = await web_search(cleaned, limit=3)
+    if not results:
+        return ""
+
+    lines = []
+    for idx, item in enumerate(results, start=1):
+        title = item.get("title") or "Result"
+        snippet = item.get("snippet") or ""
+        url = item.get("url") or ""
+        lines.append(f"[{idx}] {title}\n{snippet}\n{url}".strip())
+
+    return "\n\n".join(lines)
+
 def infer_uncertainty_markers(text: str) -> list[str]:
     lowered = (text or "").lower()
     markers = []
@@ -211,6 +240,15 @@ async def chat(request: ChatRequest, req: Request):
                 insertion_index = _insertion_index_before_last_user(working_messages)
                 working_messages.insert(insertion_index, system_msg)
                 context_items = len(filtered_context_items)
+
+    # Optional internet search context in chat (prefix `web:` or `search:`).
+    online_context = await build_online_context(query_text)
+    if online_context:
+        insertion_index = _insertion_index_before_last_user(working_messages)
+        working_messages.insert(
+            insertion_index,
+            ChatMessage(role="system", content=f"Актуальный интернет-контекст:\n{online_context}"),
+        )
 
     working_messages = trim_chat_history(working_messages)
 

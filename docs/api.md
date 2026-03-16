@@ -778,3 +778,55 @@ Base URL: `http://localhost:8000`
 3. Если нужно временно остановить автопроцессинг: `POST /api/retrieval/worker/control` с `{"paused": true}`.
 4. Хотите вручную обработать часть очереди: `POST /api/retrieval/worker/run-once?max_jobs=5`.
 5. Включаете автопроцессинг обратно: `POST /api/retrieval/worker/control` с `{"paused": false}`.
+
+
+## Online Tools API (optional internet access)
+
+Base URL: `http://localhost:8000`
+
+Enable with environment variable:
+
+```bash
+export ENABLE_ONLINE_TOOLS=1
+```
+
+### `GET /api/online/health`
+Returns whether online tools are enabled.
+
+### `POST /api/online/search`
+Request:
+
+```json
+{ "query": "latest python release", "limit": 3 }
+```
+
+Response:
+
+```json
+{
+  "enabled": true,
+  "query": "latest python release",
+  "results": [
+    { "title": "...", "snippet": "...", "url": "https://..." }
+  ]
+}
+```
+
+### `POST /api/online/download`
+Request:
+
+```json
+{ "url": "https://example.com/tool.sh", "filename": "tool.sh" }
+```
+
+Response:
+
+```json
+{
+  "enabled": true,
+  "path": "/home/.../roampal-android/downloads/tool.sh",
+  "filename": "tool.sh",
+  "size_bytes": 12345
+}
+```
+

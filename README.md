@@ -96,6 +96,25 @@ bash termux/diagnose.sh
 ```
 
 
+### Включение интернет-поиска и скачивания инструментов
+```bash
+cd ~/roampal-android
+export ENABLE_ONLINE_TOOLS=1
+
+# Поиск из API
+curl -sS -X POST http://127.0.0.1:8000/api/online/search \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"latest python release","limit":3}'
+
+# Скачать файл/инструмент в ~/roampal-android/downloads
+curl -sS -X POST http://127.0.0.1:8000/api/online/download \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com/tool.sh","filename":"tool.sh"}'
+```
+
+Для чата интернет-контекст можно подтягивать префиксами `web:` или `search:`
+(например: `web: свежие новости по llama.cpp`).
+
 ### Проверка, что модель не выходит в интернет
 ```bash
 cd ~/roampal-android
