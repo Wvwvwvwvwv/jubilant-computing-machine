@@ -18,18 +18,36 @@ Base URL: `http://localhost:8000`
   ],
   "use_memory": true,
   "max_tokens": 512,
-  "temperature": 0.7
+  "temperature": 0.7,
+  "autonomous_mode": "auto"
 }
 ```
+
+`autonomous_mode`:
+- `auto` (по умолчанию): для action-like сообщений (`установи`, `скачай`, `install`, `pip install` и т.п.) запускается автономное выполнение через sandbox/task pipeline.
+- `force`: всегда запускать автономное выполнение для последнего user-сообщения.
+- `off`: отключить автономное выполнение и использовать только text chat.
 
 **Response:**
 ```json
 {
   "response": "Привет! Чем могу помочь?",
   "memory_used": true,
-  "context_items": 3
+  "context_items": 3,
+  "autonomous": {
+    "triggered": true,
+    "task_id": "...",
+    "language": "bash",
+    "code": "echo installed",
+    "exit_code": 0,
+    "status": "SUCCESS",
+    "stdout": "installed",
+    "stderr": ""
+  }
 }
 ```
+
+Глобальный флаг: `CHAT_AUTONOMY_ENABLED=1` (по умолчанию включён). Если `0`, автономный путь не выполняется.
 
 #### POST /api/chat/feedback
 
@@ -829,4 +847,3 @@ Response:
   "size_bytes": 12345
 }
 ```
-

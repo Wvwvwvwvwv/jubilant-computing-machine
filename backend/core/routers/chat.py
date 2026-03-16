@@ -1,4 +1,5 @@
-from typing import List
+import os
+from typing import List, Optional
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request
@@ -8,11 +9,14 @@ from backend.core.services.companion_memory import CompanionMemory
 from backend.core.services.companion_state import CompanionState
 from backend.core.services.kobold_client import KoboldClient
 from backend.core.services.memory_engine import MemoryEngine
+from backend.core.services.task_planner import TaskPlanner
+from backend.core.routers.sandbox import CodeExecutionRequest, execute_code
 from backend.core.services.retrieval import search_with_backend
 from backend.core.services.online_tools import online_tools_enabled, web_search
 
 router = APIRouter()
 kobold = KoboldClient()
+task_planner = TaskPlanner()
 
 
 class ChatMessage(BaseModel):
@@ -25,12 +29,25 @@ class ChatRequest(BaseModel):
     use_memory: bool = True
     max_tokens: int = 512
     temperature: float = 0.7
+    autonomous_mode: str = "auto"  # off | auto | force
+
+
+class AutonomousExecution(BaseModel):
+    triggered: bool
+    task_id: Optional[str] = None
+    language: Optional[str] = None
+    code: Optional[str] = None
+    exit_code: Optional[int] = None
+    status: Optional[str] = None
+    stdout: str = ""
+    stderr: str = ""
 
 
 class ChatResponse(BaseModel):
     response: str
     memory_used: bool
     context_items: int
+    autonomous: Optional[AutonomousExecution] = None
 
 
 MAX_CHAT_HISTORY_MESSAGES = 14
@@ -189,6 +206,78 @@ def infer_uncertainty_markers(text: str) -> list[str]:
     return markers
 
 
+def _autonomy_enabled() -> bool:
+    return os.getenv("CHAT_AUTONOMY_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _looks_like_actionable_task(query_text: str) -> bool:
+    lowered = (query_text or "").lower()
+    markers = [
+        "установ", "скачай", "запусти", "выполни", "установи", "install", "download", "run ", "execute",
+        "pip install", "pkg install", "apt install", "python3", "python 3",
+    ]
+    return any(m in lowered for m in markers)
+
+
+def _should_run_autonomy(mode: str, query_text: str) -> bool:
+    normalized = (mode or "auto").strip().lower()
+    if normalized == "off":
+        return False
+    if normalized == "force":
+        return True
+    return _looks_like_actionable_task(query_text)
+
+
+async def _run_autonomous_task(req: Request, query_text: str) -> AutonomousExecution:
+    runner = getattr(req.app.state, "task_runner", None)
+    if runner is None:
+        return AutonomousExecution(triggered=False, stderr="task_runner is not initialized")
+
+    rec = runner.create_task(goal=query_text, max_attempts=1, approval_required=False)
+    if rec.approval_required and not rec.approved:
+        rec = runner.approve_task(rec.task_id)
+
+    plan = await task_planner.build_plan(rec.goal)
+    try:
+        result = await execute_code(CodeExecutionRequest(code=plan.code, language=plan.language, timeout=plan.timeout))
+        updated = runner.run_with_result(
+            task_id=rec.task_id,
+            exit_code=result.exit_code,
+            stdout=result.stdout or "",
+            stderr=result.stderr or "",
+            started_payload={"tool": plan.tool, "language": plan.language},
+        )
+        return AutonomousExecution(
+            triggered=True,
+            task_id=rec.task_id,
+            language=plan.language,
+            code=plan.code,
+            exit_code=result.exit_code,
+            status=updated.status.value,
+            stdout=result.stdout or "",
+            stderr=result.stderr or "",
+        )
+    except HTTPException as exc:
+        exit_code = 124 if exc.status_code == 408 else 1
+        updated = runner.run_with_result(
+            task_id=rec.task_id,
+            exit_code=exit_code,
+            stdout="",
+            stderr=str(exc.detail),
+            started_payload={"tool": plan.tool, "language": plan.language},
+        )
+        return AutonomousExecution(
+            triggered=True,
+            task_id=rec.task_id,
+            language=plan.language,
+            code=plan.code,
+            exit_code=exit_code,
+            status=updated.status.value,
+            stdout="",
+            stderr=str(exc.detail),
+        )
+
+
 @router.post("", response_model=ChatResponse)
 @router.post("/", response_model=ChatResponse)
 async def chat(request: ChatRequest, req: Request):
@@ -208,6 +297,7 @@ async def chat(request: ChatRequest, req: Request):
     working_messages = list(request.messages)
     used_relationship_ids: list[str] = []
     active_kobold: KoboldClient = getattr(req.app.state, "kobold_client", kobold)
+    autonomous_info: Optional[AutonomousExecution] = None
 
     # Companion behavior policy injection (mode/challenge)
     if companion_state is not None:
@@ -250,6 +340,27 @@ async def chat(request: ChatRequest, req: Request):
             ChatMessage(role="system", content=f"Актуальный интернет-контекст:\n{online_context}"),
         )
 
+    if _autonomy_enabled() and _should_run_autonomy(request.autonomous_mode, query_text):
+        autonomous_info = await _run_autonomous_task(req, query_text)
+        if autonomous_info.triggered:
+            insertion_index = _insertion_index_before_last_user(working_messages)
+            working_messages.insert(
+                insertion_index,
+                ChatMessage(
+                    role="system",
+                    content=(
+                        "Автономное выполнение пользовательской задачи уже выполнено. "
+                        "Сформируй отчёт строго по факту выполнения.\n"
+                        f"task_id: {autonomous_info.task_id}\n"
+                        f"status: {autonomous_info.status}\n"
+                        f"language: {autonomous_info.language}\n"
+                        f"exit_code: {autonomous_info.exit_code}\n"
+                        f"stdout:\n{autonomous_info.stdout[:1200]}\n"
+                        f"stderr:\n{autonomous_info.stderr[:1200]}"
+                    ),
+                ),
+            )
+
     working_messages = trim_chat_history(working_messages)
 
     # Отправка в KoboldCpp
@@ -284,6 +395,7 @@ async def chat(request: ChatRequest, req: Request):
             response=response,
             memory_used=request.use_memory,
             context_items=context_items,
+            autonomous=autonomous_info,
         )
 
     except Exception as e:

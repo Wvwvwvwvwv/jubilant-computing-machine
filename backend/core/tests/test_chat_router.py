@@ -15,6 +15,7 @@ from backend.core.routers.chat import (
     trim_chat_history,
 )
 from backend.core.services.companion_state import CompanionState
+from backend.core.services.task_runner import TaskRunner
 
 
 class FakeMemoryEngine:
@@ -233,3 +234,80 @@ def test_build_online_context_enabled(monkeypatch):
     result = asyncio.run(build_online_context("web: weather moscow"))
     assert "Result" in result
     assert "https://example.com" in result
+
+
+def test_chat_autonomy_auto_mode_executes_actionable_query(monkeypatch):
+    app = FastAPI()
+    app.include_router(chat_router.router, prefix="/api/chat")
+    app.state.memory_engine = FakeMemoryEngine()
+    app.state.companion_state = CompanionState()
+    app.state.companion_memory = FakeCompanionMemory()
+    app.state.task_runner = TaskRunner()
+
+    async def fake_generate(messages, max_tokens=512, temperature=0.7):
+        return "Готово"
+
+    async def fake_execute(request):
+        class Result:
+            exit_code = 0
+            stdout = "installed"
+            stderr = ""
+
+        return Result()
+
+    async def fake_plan(goal: str):
+        class Plan:
+            tool = "sandbox.execute"
+            language = "bash"
+            code = "echo installed"
+            timeout = 30
+
+        return Plan()
+
+    monkeypatch.setattr(chat_router.kobold, "generate", fake_generate)
+    monkeypatch.setattr(chat_router, "execute_code", fake_execute)
+    monkeypatch.setattr(chat_router.task_planner, "build_plan", fake_plan)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/chat/",
+        json={"messages": [{"role": "user", "content": "Установи python 3.13"}], "use_memory": False},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["autonomous"]["triggered"] is True
+    assert body["autonomous"]["status"] == "SUCCESS"
+    assert body["autonomous"]["stdout"] == "installed"
+
+
+def test_chat_autonomy_can_be_disabled_per_request(monkeypatch):
+    app = FastAPI()
+    app.include_router(chat_router.router, prefix="/api/chat")
+    app.state.memory_engine = FakeMemoryEngine()
+    app.state.companion_state = CompanionState()
+    app.state.companion_memory = FakeCompanionMemory()
+    app.state.task_runner = TaskRunner()
+
+    async def fake_generate(messages, max_tokens=512, temperature=0.7):
+        return "Только текст"
+
+    async def fake_execute(request):
+        raise AssertionError("must not execute when autonomous_mode=off")
+
+    monkeypatch.setattr(chat_router.kobold, "generate", fake_generate)
+    monkeypatch.setattr(chat_router, "execute_code", fake_execute)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/chat/",
+        json={
+            "messages": [{"role": "user", "content": "Установи python 3.13"}],
+            "use_memory": False,
+            "autonomous_mode": "off",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body.get("autonomous") is None
