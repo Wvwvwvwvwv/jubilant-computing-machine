@@ -1,371 +1,209 @@
-import { useEffect, useRef, useState } from 'react'
-import { Send, ThumbsUp, ThumbsDown, Mic, Square } from 'lucide-react'
-import { chatAPI } from '../api/client'
+import { useMemo, useRef, useState } from 'react'
+import { chatAPI, onlineAPI, sandboxAPI, voiceAPI } from '../api/client'
+import { useAppState } from '../state/AppState'
 
-interface Message {
-  role: 'user' | 'assistant'
-  content: string
-  id?: string
+const AGENT_PROMPT = [
+  'Ты локальный автономный агент Roampal.',
+  'Никакого ручного подтверждения: сам выбирай web_search и sandbox при любых action-oriented запросах.',
+  'Если задача содержит поиск/скачивание/анализ/установку/изменение/запуск/проверку, сначала собери контекст, затем выполни действие и верни итог.',
+  'Пиши кратко: шаги, результат, риски.'
+].join('\n')
+
+const ACTION_RE = /(найди|скачай|поищи|посмотри|уточни|установи|конвертируй|измени|запустить|запусти|проверь|разбери|проанализируй|search|download|install|convert|run|analy[sz]e)/i
+
+type BrowserRecognition = {
+  lang: string
+  interimResults: boolean
+  maxAlternatives: number
+  continuous: boolean
+  onresult: ((event: any) => void) | null
+  onerror: ((event: any) => void) | null
+  onend: (() => void) | null
+  start: () => void
+  stop: () => void
 }
 
-interface ChatDraftState {
-  messages: Message[]
-  useMemory: boolean
-  input: string
-}
-
-const CHAT_MESSAGES_KEY = 'chat_messages'
-const CHAT_USE_MEMORY_KEY = 'chat_use_memory'
-const CHAT_INPUT_KEY = 'chat_input'
-
-// In-memory fallback: survives route unmount/mount even if storage is unavailable.
-let chatDraftState: ChatDraftState | null = null
-
-function loadMessages(): Message[] {
-  if (chatDraftState) {
-    return chatDraftState.messages
-  }
-
-  try {
-    const saved = localStorage.getItem(CHAT_MESSAGES_KEY)
-    const parsed = saved ? JSON.parse(saved) : []
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
-function loadUseMemory(): boolean {
-  if (chatDraftState) {
-    return chatDraftState.useMemory
-  }
-
-  try {
-    const saved = localStorage.getItem(CHAT_USE_MEMORY_KEY)
-    return saved ? Boolean(JSON.parse(saved)) : true
-  } catch {
-    return true
-  }
-}
-
-function loadInput(): string {
-  if (chatDraftState) {
-    return chatDraftState.input
-  }
-
-  try {
-    return localStorage.getItem(CHAT_INPUT_KEY) || ''
-  } catch {
-    return ''
-  }
-}
-
-function persistState(messages: Message[], useMemory: boolean, input: string) {
-  chatDraftState = { messages, useMemory, input }
-
-  try {
-    localStorage.setItem(CHAT_MESSAGES_KEY, JSON.stringify(messages))
-    localStorage.setItem(CHAT_USE_MEMORY_KEY, JSON.stringify(useMemory))
-    localStorage.setItem(CHAT_INPUT_KEY, input)
-  } catch {
-    // ignore storage errors (quota/private mode)
-  }
+function safeSpeak(text: string) {
+  if (!('speechSynthesis' in window)) return
+  window.speechSynthesis.cancel()
+  const utterance = new SpeechSynthesisUtterance(text.slice(0, 400))
+  utterance.lang = 'ru-RU'
+  window.speechSynthesis.speak(utterance)
 }
 
 export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>(loadMessages)
-  const [input, setInput] = useState(loadInput)
+  const {
+    dialogs,
+    activeDialogId,
+    appendDialogMessage,
+    appendTerminalLine,
+    setActiveTab,
+    selectedModel
+  } = useAppState()
+
+  const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [useMemory, setUseMemory] = useState<boolean>(loadUseMemory)
-  const [isDictating, setIsDictating] = useState(false)
+  const [voiceSessionId, setVoiceSessionId] = useState<string | null>(null)
+  const [listening, setListening] = useState(false)
+  const recognitionRef = useRef<BrowserRecognition | null>(null)
 
-  const messagesRef = useRef(messages)
-  const useMemoryRef = useRef(useMemory)
-  const inputRef = useRef(input)
-  const recognitionRef = useRef<any>(null)
+  const activeDialog = useMemo(() => dialogs.find((d) => d.id === activeDialogId), [dialogs, activeDialogId])
+  const messages = activeDialog?.messages || []
 
-  useEffect(() => {
-    return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop()
-      }
-    }
-  }, [])
-
-  const updateMessages = (next: Message[] | ((prev: Message[]) => Message[])) => {
-    setMessages(prev => {
-      const computed = typeof next === 'function' ? (next as (p: Message[]) => Message[])(prev) : next
-      messagesRef.current = computed
-      persistState(computed, useMemoryRef.current, inputRef.current)
-      return computed
-    })
-  }
-
-  const updateUseMemory = (next: boolean) => {
-    useMemoryRef.current = next
-    setUseMemory(next)
-    persistState(messagesRef.current, next, inputRef.current)
-  }
-
-  const updateInput = (next: string) => {
-    inputRef.current = next
-    setInput(next)
-    persistState(messagesRef.current, useMemoryRef.current, next)
-  }
-
-  const stopDictation = () => {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop()
-      recognitionRef.current = null
-    }
-    setIsDictating(false)
-  }
-
-  const startDictation = () => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-    if (!SpeechRecognition) {
-      updateMessages(prev => [...prev, {
-        role: 'assistant',
-        content: '❌ Браузер не поддерживает SpeechRecognition для диктовки в чат.'
-      }])
-      return
-    }
+  const runSandboxWithPolling = async (code: string, language: string = 'python', timeout = 120) => {
+    let running = true
+    const pollId = window.setInterval(() => {
+      if (!running) return
+      appendTerminalLine({ stream: 'system', text: '...sandbox still running (poll: 1s)' })
+    }, 1000)
 
     try {
-      const rec = new SpeechRecognition()
-      rec.lang = 'ru-RU'
-      rec.interimResults = true
-      rec.maxAlternatives = 1
-      rec.continuous = true
-
-      let lastSegment = ''
-      rec.onresult = (event: any) => {
-        const parts: string[] = []
-        for (let i = event.resultIndex; i < event.results.length; i += 1) {
-          parts.push(event.results[i][0].transcript)
-        }
-        const segment = parts.join(' ').trim()
-        if (!segment) return
-
-        const base = inputRef.current.endsWith(lastSegment)
-          ? inputRef.current.slice(0, inputRef.current.length - lastSegment.length).trim()
-          : inputRef.current
-        const nextInput = [base, segment].filter(Boolean).join(' ').trim()
-        lastSegment = segment
-        updateInput(nextInput)
-      }
-
-      rec.onerror = (event: any) => {
-        setIsDictating(false)
-        updateMessages(prev => [...prev, {
-          role: 'assistant',
-          content: `❌ Ошибка диктовки: ${event?.error || 'unknown'}`
-        }])
-      }
-      rec.onend = () => {
-        setIsDictating(false)
-        recognitionRef.current = null
-      }
-
-      recognitionRef.current = rec
-      rec.start()
-      setIsDictating(true)
-    } catch (e: any) {
-      setIsDictating(false)
-      updateMessages(prev => [...prev, {
-        role: 'assistant',
-        content: `❌ Не удалось запустить диктовку: ${e?.message || 'unknown'}`
-      }])
+      const result = await sandboxAPI.execute(code, language, timeout)
+      appendTerminalLine({ stream: result.exit_code === 0 ? 'stdout' : 'stderr', text: `exit_code=${result.exit_code}` })
+      if (result.stdout) appendTerminalLine({ stream: 'stdout', text: result.stdout })
+      if (result.stderr) appendTerminalLine({ stream: 'stderr', text: result.stderr })
+      return result
+    } finally {
+      running = false
+      window.clearInterval(pollId)
     }
   }
 
-  const sendMessage = async () => {
-    if (!input.trim() || loading) return
+  const executeAgentPipeline = async (userText: string) => {
+    const triggered = ACTION_RE.test(userText)
+    if (!triggered) return { triggered: false }
 
-    const userMessage: Message = { role: 'user', content: input }
-    const nextMessages = [...messagesRef.current, userMessage]
+    setActiveTab('terminal')
+    appendTerminalLine({ stream: 'system', text: `[agent] trigger detected: ${userText}` })
 
-    updateMessages(nextMessages)
-    updateInput('')
+    const search = await onlineAPI.search(userText, 3)
+    const results = Array.isArray(search?.results) ? search.results : []
+    appendTerminalLine({ stream: 'system', text: `[agent] web_search returned ${results.length} items` })
+
+    const scriptLines = [
+      "import json",
+      "print('AGENT: starting automated analysis')",
+      `query = ${JSON.stringify(userText)}`,
+      `results = ${JSON.stringify(results)}`,
+      "print('QUERY:', query)",
+      "for idx, item in enumerate(results, 1):",
+      "    title = item.get('title', 'Result')",
+      "    url = item.get('url', '')",
+      "    print(f'[{idx}] {title} -> {url}')",
+      "print('AGENT: completed analysis')"
+    ]
+
+    const sandbox = await runSandboxWithPolling(scriptLines.join('\n'))
+    return { triggered: true, results, sandbox }
+  }
+
+  const sendMessage = async (rawText?: string, source: 'text' | 'voice' = 'text') => {
+    const content = (rawText ?? input).trim()
+    if (!content || loading || !activeDialog) return
+
+    appendDialogMessage(activeDialog.id, { role: 'user', content })
+    if (source === 'text') setInput('')
     setLoading(true)
 
     try {
-      const response = await chatAPI.send(nextMessages, useMemoryRef.current)
+      const agentContext = await executeAgentPipeline(content)
 
-      updateMessages(prev => [...prev, {
-        role: 'assistant',
-        content: response.response,
-        id: response.interaction_id
-      }])
+      const dialogNow = dialogs.find((d) => d.id === activeDialog.id) || activeDialog
+      const payloadMessages = [
+        { role: 'system', content: AGENT_PROMPT },
+        { role: 'system', content: `Текущая модель: ${selectedModel}` },
+        ...dialogNow.messages.map((m) => ({ role: m.role, content: m.content }))
+      ]
+
+      if (agentContext.triggered) {
+        const summary = {
+          search_count: agentContext.results.length,
+          sandbox_exit_code: agentContext.sandbox?.exit_code,
+          sandbox_stdout_tail: String(agentContext.sandbox?.stdout || '').slice(-500),
+          sandbox_stderr_tail: String(agentContext.sandbox?.stderr || '').slice(-500)
+        }
+        payloadMessages.push({ role: 'system', content: `AGENT_TOOL_CONTEXT: ${JSON.stringify(summary)}` })
+      }
+
+      const response = await chatAPI.send(payloadMessages, true)
+      const text = response?.response || 'Пустой ответ от модели.'
+      appendDialogMessage(activeDialog.id, { role: 'assistant', content: text })
+      safeSpeak(text)
     } catch (error: any) {
-      console.error('Chat error:', error)
-      const detail = error?.response?.data?.detail
-      updateMessages(prev => [...prev, {
-        role: 'assistant',
-        content: detail ? `❌ ${detail}` : '❌ Ошибка соединения с сервером'
-      }])
+      appendDialogMessage(activeDialog.id, { role: 'assistant', content: `❌ ${error?.response?.data?.detail || error?.message || 'chat error'}` })
     } finally {
       setLoading(false)
     }
   }
 
-  const handleFeedback = async (messageId: string, helpful: boolean) => {
-    try {
-      await chatAPI.feedback(messageId, helpful)
-    } catch (error) {
-      console.error('Feedback error:', error)
+  const toggleVoice = async () => {
+    if (listening) {
+      recognitionRef.current?.stop()
+      setListening(false)
+      if (voiceSessionId) await voiceAPI.stopSession(voiceSessionId)
+      setVoiceSessionId(null)
+      return
     }
+
+    const session = await voiceAPI.startSession('duplex', 'female')
+    setVoiceSessionId(session.voice_session_id)
+    await voiceAPI.verifyMicrophone(session.voice_session_id, true, 'browser_speech', 'local_whisper_cpp control-plane active')
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      appendDialogMessage(activeDialogId, { role: 'assistant', content: '❌ SpeechRecognition not supported in this browser.' })
+      return
+    }
+
+    const rec: BrowserRecognition = new SpeechRecognition()
+    rec.lang = 'ru-RU'
+    rec.interimResults = false
+    rec.maxAlternatives = 1
+    rec.continuous = true
+    rec.onresult = (event: any) => {
+      const transcript = event.results?.[event.results.length - 1]?.[0]?.transcript?.trim()
+      if (transcript) void sendMessage(transcript, 'voice')
+    }
+    rec.onerror = () => setListening(false)
+    rec.onend = () => setListening(false)
+    rec.start()
+    recognitionRef.current = rec
+    setListening(true)
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Messages */}
-      <div style={{
-        flex: 1,
-        overflowY: 'auto',
-        padding: '1rem',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '1rem'
-      }}>
-        {messages.map((msg, idx) => (
-          <div
-            key={idx}
-            style={{
-              alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-              maxWidth: '80%'
-            }}
-          >
-            <div style={{
-              background: msg.role === 'user' ? '#3b82f6' : '#1f1f1f',
-              padding: '0.75rem 1rem',
-              borderRadius: '1rem',
-              wordWrap: 'break-word'
-            }}>
-              {msg.content}
-            </div>
-
-            {msg.role === 'assistant' && msg.id && (
-              <div style={{
-                display: 'flex',
-                gap: '0.5rem',
-                marginTop: '0.5rem',
-                fontSize: '0.875rem'
-              }}>
-                <button
-                  onClick={() => handleFeedback(msg.id!, true)}
-                  style={{
-                    background: 'transparent',
-                    border: '1px solid #333',
-                    borderRadius: '0.5rem',
-                    padding: '0.25rem 0.5rem',
-                    color: '#888',
-                    cursor: 'pointer'
-                  }}
-                >
-                  <ThumbsUp size={14} />
-                </button>
-                <button
-                  onClick={() => handleFeedback(msg.id!, false)}
-                  style={{
-                    background: 'transparent',
-                    border: '1px solid #333',
-                    borderRadius: '0.5rem',
-                    padding: '0.25rem 0.5rem',
-                    color: '#888',
-                    cursor: 'pointer'
-                  }}
-                >
-                  <ThumbsDown size={14} />
-                </button>
-              </div>
-            )}
+    <div className="h-full flex flex-col overflow-hidden">
+      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        {messages.map((msg) => (
+          <div key={msg.id} className={`max-w-[85%] rounded px-3 py-2 text-sm whitespace-pre-wrap ${msg.role === 'user' ? 'ml-auto bg-blue-600' : 'bg-neutral-800'}`}>
+            {msg.content}
           </div>
         ))}
-
-        {loading && (
-          <div style={{ alignSelf: 'flex-start' }}>
-            <div style={{
-              background: '#1f1f1f',
-              padding: '0.75rem 1rem',
-              borderRadius: '1rem'
-            }}>
-              Думаю...
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* Input */}
-      <div style={{
-        padding: '1rem',
-        borderTop: '1px solid #222',
-        display: 'flex',
-        gap: '0.5rem',
-        alignItems: 'center'
-      }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem' }}>
-          <input
-            type="checkbox"
-            checked={useMemory}
-            onChange={(e) => updateUseMemory(e.target.checked)}
-          />
-          Память
-        </label>
-
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => updateInput(e.target.value)}
-          onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-          placeholder="Сообщение..."
-          style={{
-            flex: 1,
-            background: '#1a1a1a',
-            border: '1px solid #333',
-            borderRadius: '1.5rem',
-            padding: '0.75rem 1rem',
-            color: '#fff',
-            outline: 'none'
-          }}
-        />
-
+      <div className="border-t border-neutral-800 p-3 flex gap-2">
         <button
-          onClick={sendMessage}
-          disabled={loading || !input.trim()}
-          style={{
-            background: '#3b82f6',
-            border: 'none',
-            borderRadius: '50%',
-            width: '3rem',
-            height: '3rem',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: loading ? 'not-allowed' : 'pointer',
-            opacity: loading ? 0.5 : 1
-          }}
+          onClick={() => void toggleVoice()}
+          className={`rounded px-3 py-2 text-sm ${listening ? 'bg-red-600' : 'bg-neutral-700'}`}
+          title="PTT/continuous voice"
         >
-          <Send size={20} />
+          {listening ? '🎙️ stop' : '🎤 voice'}
         </button>
-
-        <button
-          onClick={isDictating ? stopDictation : startDictation}
-          style={{
-            background: isDictating ? '#dc2626' : '#374151',
-            border: 'none',
-            borderRadius: '50%',
-            width: '3rem',
-            height: '3rem',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-            color: '#fff'
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void sendMessage()
           }}
-          title={isDictating ? 'Остановить диктовку' : 'Диктовка в чат'}
+          placeholder="Введите сообщение или команду..."
+          className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
+        />
+        <button
+          disabled={loading}
+          onClick={() => void sendMessage()}
+          className="rounded bg-blue-600 px-4 py-2 text-sm disabled:opacity-60"
         >
-          {isDictating ? <Square size={18} /> : <Mic size={18} />}
+          {loading ? '...' : 'Отправить'}
         </button>
       </div>
     </div>

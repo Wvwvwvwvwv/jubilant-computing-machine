@@ -139,6 +139,18 @@ export const companionAPI = {
 }
 
 
+export const onlineAPI = {
+  search: async (query: string, limit: number = 3) => {
+    const { data } = await api.post('/online/search', { query, limit })
+    return data
+  },
+
+  download: async (url: string, filename?: string) => {
+    const { data } = await api.post('/online/download', { url, filename })
+    return data
+  }
+}
+
 export const voiceAPI = {
   startSession: async (mode: 'ptt' | 'duplex' = 'ptt', voiceGender: 'male' | 'female' = 'female') => {
     const ttsEngine = voiceGender === 'male' ? 'local_piper_male' : 'local_piper_female'
