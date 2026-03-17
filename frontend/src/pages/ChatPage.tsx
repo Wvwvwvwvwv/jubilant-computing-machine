@@ -2,16 +2,17 @@ import { useMemo, useRef, useState } from 'react'
 import { chatAPI, onlineAPI, sandboxAPI, voiceAPI } from '../api/client'
 import { useAppState } from '../state/AppState'
 
-// System policy injected into every chat request.
+// Hard system policy for model-driven autonomous tool usage.
 const AGENT_SYSTEM_PROMPT = [
   'You are Roampal autonomous local agent.',
-  'No manual confirmation, no extra planners. You decide tool usage yourself.',
-  'For action-oriented user intents, automatically use web_search and sandbox, then return concise final summary.',
-  'Action intents include: find/search, download, inspect, уточни, install, convert, modify, run, verify, analyze.'
+  'No manual confirmations and no additional planners.',
+  'Model decides when and how to use web_search + sandbox.',
+  'For any action-oriented user intent (text or voice), automatically run web_search first, then run required operations in sandbox.',
+  'During execution, provide terminal-like step-by-step progress, then return one concise final result card.'
 ].join('\n')
 
 const ACTION_INTENT_RE =
-  /(найди|скачай|поищи|посмотри|уточни|установи|конвертируй|измени|запустить|запусти|проверь|разбери|проанализируй|find|search|download|inspect|install|convert|modify|run|verify|analy[sz]e)/i
+  /(найди|скачай|поищи|посмотри|уточни|установи|конвертируй|измени|запустить|запусти|проверь|разбери|проанализируй|find|search|download|inspect|install|convert|modify|run|verify|analy[sz]e|check|parse)/i
 
 type BrowserRecognition = {
   lang: string
@@ -28,9 +29,32 @@ type BrowserRecognition = {
 function speak(text: string) {
   if (!('speechSynthesis' in window)) return
   window.speechSynthesis.cancel()
-  const u = new SpeechSynthesisUtterance(text.slice(0, 500))
-  u.lang = 'ru-RU'
-  window.speechSynthesis.speak(u)
+  const utterance = new SpeechSynthesisUtterance(text.slice(0, 500))
+  utterance.lang = 'ru-RU'
+  window.speechSynthesis.speak(utterance)
+}
+
+function buildSandboxScript(query: string, results: Array<Record<string, any>>) {
+  return [
+    'from datetime import datetime',
+    "def log(line):",
+    "    print(f'[{datetime.now().strftime(\"%H:%M:%S\")}] {line}')",
+    "log('$ agent start')",
+    `query = ${JSON.stringify(query)}`,
+    `results = ${JSON.stringify(results)}`,
+    "log(f'query: {query}')",
+    "log(f'search_results: {len(results)}')",
+    "for idx, item in enumerate(results, 1):",
+    "    title = item.get('title', 'Result')",
+    "    url = item.get('url', '')",
+    "    log(f'[{idx}] {title} -> {url}')",
+    "log('$ sandbox analyze')",
+    "if results:",
+    "    log('analysis: using first results as context for autonomous decision')",
+    "else:",
+    "    log('analysis: no web results, fallback to local reasoning')",
+    "log('$ done')"
+  ].join('\n')
 }
 
 export default function ChatPage() {
@@ -48,10 +72,11 @@ export default function ChatPage() {
   const runSandboxLive = async (code: string) => {
     let running = true
     const poll = window.setInterval(() => {
-      if (running) appendTerminalLine({ stream: 'system', text: 'sandbox running... (poll 1s)' })
+      if (running) appendTerminalLine({ stream: 'system', text: '[poll] sandbox running...' })
     }, 1000)
 
     try {
+      appendTerminalLine({ stream: 'system', text: '$ sandbox execute --language python' })
       const result = await sandboxAPI.execute(code, 'python', 120)
       appendTerminalLine({ stream: result.exit_code === 0 ? 'stdout' : 'stderr', text: `exit_code=${result.exit_code}` })
       if (result.stdout) appendTerminalLine({ stream: 'stdout', text: result.stdout })
@@ -63,28 +88,23 @@ export default function ChatPage() {
     }
   }
 
-  const autoTools = async (text: string) => {
+  const autoToolsIfNeeded = async (text: string) => {
     if (!ACTION_INTENT_RE.test(text)) return null
 
+    // Mandatory auto switch to terminal for agent actions.
     setActiveTab('terminal')
-    appendTerminalLine({ stream: 'system', text: `[agent] action intent detected: ${text}` })
+    appendTerminalLine({ stream: 'system', text: '$ agent detect-action-intent' })
 
-    const searchResp = await onlineAPI.search(text, 3)
+    // Mandatory web_search before sandbox operations.
+    appendTerminalLine({ stream: 'system', text: '$ web_search' })
+    const searchResp = await onlineAPI.search(text, 5)
     const results = Array.isArray(searchResp?.results) ? searchResp.results : []
-    appendTerminalLine({ stream: 'system', text: `[agent] web_search results=${results.length}` })
+    appendTerminalLine({ stream: 'system', text: `web_search results=${results.length}` })
 
-    // Script intentionally mirrors tool usage for transparent terminal output.
-    const code = [
-      "print('AGENT TOOL PIPELINE START')",
-      `query = ${JSON.stringify(text)}`,
-      `results = ${JSON.stringify(results)}`,
-      "print('query:', query)",
-      "for i, item in enumerate(results, 1):",
-      "    print(f'[{i}] {item.get(\"title\", \"Result\")} | {item.get(\"url\", \"\")}')",
-      "print('AGENT TOOL PIPELINE END')"
-    ].join('\n')
+    // Sandbox operation with terminal-like output.
+    const script = buildSandboxScript(text, results)
+    const sandboxResp = await runSandboxLive(script)
 
-    const sandboxResp = await runSandboxLive(code)
     return { results, sandboxResp }
   }
 
@@ -97,9 +117,9 @@ export default function ChatPage() {
     setLoading(true)
 
     try {
-      const tools = await autoTools(text)
+      const toolContext = await autoToolsIfNeeded(text)
 
-      const payloadMessages = [
+      const payloadMessages: Array<{ role: string; content: string }> = [
         { role: 'system', content: AGENT_SYSTEM_PROMPT },
         { role: 'system', content: `Selected model: ${selectedModel}` },
         ...[...messages, { id: 'tmp_user', role: 'user' as const, content: text, createdAt: Date.now() }].map((m) => ({
@@ -108,22 +128,24 @@ export default function ChatPage() {
         }))
       ]
 
-      if (tools) {
+      if (toolContext) {
         payloadMessages.push({
           role: 'system',
           content: `TOOL_CONTEXT: ${JSON.stringify({
-            web_results: tools.results.length,
-            sandbox_exit_code: tools.sandboxResp?.exit_code,
-            sandbox_stdout_tail: String(tools.sandboxResp?.stdout || '').slice(-700),
-            sandbox_stderr_tail: String(tools.sandboxResp?.stderr || '').slice(-700)
+            web_results_count: toolContext.results.length,
+            sandbox_exit_code: toolContext.sandboxResp?.exit_code,
+            sandbox_stdout_tail: String(toolContext.sandboxResp?.stdout || '').slice(-800),
+            sandbox_stderr_tail: String(toolContext.sandboxResp?.stderr || '').slice(-800)
           })}`
         })
       }
 
       const response = await chatAPI.send(payloadMessages, true)
-      const answer = response?.response || 'No response'
-      appendDialogMessage(activeDialog.id, { role: 'assistant', content: answer })
-      speak(answer)
+      const assistantText = response?.response || 'No response'
+
+      // Exactly one final chat card with result summary.
+      appendDialogMessage(activeDialog.id, { role: 'assistant', content: assistantText })
+      speak(assistantText)
     } catch (error: any) {
       appendDialogMessage(activeDialog.id, {
         role: 'assistant',
