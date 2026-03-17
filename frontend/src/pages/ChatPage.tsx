@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react'
-import { Send, ThumbsUp, ThumbsDown } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Send, ThumbsUp, ThumbsDown, Mic, Square } from 'lucide-react'
 import { chatAPI } from '../api/client'
 
 interface Message {
@@ -11,10 +11,12 @@ interface Message {
 interface ChatDraftState {
   messages: Message[]
   useMemory: boolean
+  input: string
 }
 
 const CHAT_MESSAGES_KEY = 'chat_messages'
 const CHAT_USE_MEMORY_KEY = 'chat_use_memory'
+const CHAT_INPUT_KEY = 'chat_input'
 
 // In-memory fallback: survives route unmount/mount even if storage is unavailable.
 let chatDraftState: ChatDraftState | null = null
@@ -46,12 +48,25 @@ function loadUseMemory(): boolean {
   }
 }
 
-function persistState(messages: Message[], useMemory: boolean) {
-  chatDraftState = { messages, useMemory }
+function loadInput(): string {
+  if (chatDraftState) {
+    return chatDraftState.input
+  }
+
+  try {
+    return localStorage.getItem(CHAT_INPUT_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+function persistState(messages: Message[], useMemory: boolean, input: string) {
+  chatDraftState = { messages, useMemory, input }
 
   try {
     localStorage.setItem(CHAT_MESSAGES_KEY, JSON.stringify(messages))
     localStorage.setItem(CHAT_USE_MEMORY_KEY, JSON.stringify(useMemory))
+    localStorage.setItem(CHAT_INPUT_KEY, input)
   } catch {
     // ignore storage errors (quota/private mode)
   }
@@ -59,18 +74,29 @@ function persistState(messages: Message[], useMemory: boolean) {
 
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>(loadMessages)
-  const [input, setInput] = useState('')
+  const [input, setInput] = useState(loadInput)
   const [loading, setLoading] = useState(false)
   const [useMemory, setUseMemory] = useState<boolean>(loadUseMemory)
+  const [isDictating, setIsDictating] = useState(false)
 
   const messagesRef = useRef(messages)
   const useMemoryRef = useRef(useMemory)
+  const inputRef = useRef(input)
+  const recognitionRef = useRef<any>(null)
+
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop()
+      }
+    }
+  }, [])
 
   const updateMessages = (next: Message[] | ((prev: Message[]) => Message[])) => {
     setMessages(prev => {
       const computed = typeof next === 'function' ? (next as (p: Message[]) => Message[])(prev) : next
       messagesRef.current = computed
-      persistState(computed, useMemoryRef.current)
+      persistState(computed, useMemoryRef.current, inputRef.current)
       return computed
     })
   }
@@ -78,7 +104,79 @@ export default function ChatPage() {
   const updateUseMemory = (next: boolean) => {
     useMemoryRef.current = next
     setUseMemory(next)
-    persistState(messagesRef.current, next)
+    persistState(messagesRef.current, next, inputRef.current)
+  }
+
+  const updateInput = (next: string) => {
+    inputRef.current = next
+    setInput(next)
+    persistState(messagesRef.current, useMemoryRef.current, next)
+  }
+
+  const stopDictation = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop()
+      recognitionRef.current = null
+    }
+    setIsDictating(false)
+  }
+
+  const startDictation = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      updateMessages(prev => [...prev, {
+        role: 'assistant',
+        content: '❌ Браузер не поддерживает SpeechRecognition для диктовки в чат.'
+      }])
+      return
+    }
+
+    try {
+      const rec = new SpeechRecognition()
+      rec.lang = 'ru-RU'
+      rec.interimResults = true
+      rec.maxAlternatives = 1
+      rec.continuous = true
+
+      let lastSegment = ''
+      rec.onresult = (event: any) => {
+        const parts: string[] = []
+        for (let i = event.resultIndex; i < event.results.length; i += 1) {
+          parts.push(event.results[i][0].transcript)
+        }
+        const segment = parts.join(' ').trim()
+        if (!segment) return
+
+        const base = inputRef.current.endsWith(lastSegment)
+          ? inputRef.current.slice(0, inputRef.current.length - lastSegment.length).trim()
+          : inputRef.current
+        const nextInput = [base, segment].filter(Boolean).join(' ').trim()
+        lastSegment = segment
+        updateInput(nextInput)
+      }
+
+      rec.onerror = (event: any) => {
+        setIsDictating(false)
+        updateMessages(prev => [...prev, {
+          role: 'assistant',
+          content: `❌ Ошибка диктовки: ${event?.error || 'unknown'}`
+        }])
+      }
+      rec.onend = () => {
+        setIsDictating(false)
+        recognitionRef.current = null
+      }
+
+      recognitionRef.current = rec
+      rec.start()
+      setIsDictating(true)
+    } catch (e: any) {
+      setIsDictating(false)
+      updateMessages(prev => [...prev, {
+        role: 'assistant',
+        content: `❌ Не удалось запустить диктовку: ${e?.message || 'unknown'}`
+      }])
+    }
   }
 
   const sendMessage = async () => {
@@ -88,7 +186,7 @@ export default function ChatPage() {
     const nextMessages = [...messagesRef.current, userMessage]
 
     updateMessages(nextMessages)
-    setInput('')
+    updateInput('')
     setLoading(true)
 
     try {
@@ -218,7 +316,7 @@ export default function ChatPage() {
         <input
           type="text"
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => updateInput(e.target.value)}
           onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
           placeholder="Сообщение..."
           style={{
@@ -249,6 +347,25 @@ export default function ChatPage() {
           }}
         >
           <Send size={20} />
+        </button>
+
+        <button
+          onClick={isDictating ? stopDictation : startDictation}
+          style={{
+            background: isDictating ? '#dc2626' : '#374151',
+            border: 'none',
+            borderRadius: '50%',
+            width: '3rem',
+            height: '3rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            color: '#fff'
+          }}
+          title={isDictating ? 'Остановить диктовку' : 'Диктовка в чат'}
+        >
+          {isDictating ? <Square size={18} /> : <Mic size={18} />}
         </button>
       </div>
     </div>

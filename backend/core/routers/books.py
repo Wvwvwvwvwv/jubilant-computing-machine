@@ -5,7 +5,9 @@ import tempfile
 from typing import List
 
 import aiofiles
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+
+from backend.core.services.retrieval_jobs import RetrievalJobState
 
 router = APIRouter()
 
@@ -100,8 +102,17 @@ def _ocr_image(image_path: Path, pytesseract_mod) -> str:
     return ""
 
 
+def maybe_enqueue_retrieval_index_job(req: Request, book_id: str) -> str | None:
+    job_state: RetrievalJobState | None = getattr(req.app.state, "retrieval_job_state", None)
+    if job_state is None:
+        return None
+
+    job = job_state.create_index_job(source_type="book", source_ref=book_id)
+    return job.job_id
+
+
 @router.post("/upload")
-async def upload_book(file: UploadFile = File(...)):
+async def upload_book(req: Request, file: UploadFile = File(...)):
     """Загрузить книгу или текстовый файл"""
 
     if not file.filename.lower().endswith((".txt", ".md", ".pdf")):
@@ -128,6 +139,7 @@ async def upload_book(file: UploadFile = File(...)):
             "filename": incoming_name,
             "size": len(content),
             "status": "uploaded",
+            "retrieval_job_id": maybe_enqueue_retrieval_index_job(req, file_hash),
         }
 
     except HTTPException:

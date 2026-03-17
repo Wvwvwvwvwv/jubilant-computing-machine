@@ -18,18 +18,38 @@ Base URL: `http://localhost:8000`
   ],
   "use_memory": true,
   "max_tokens": 512,
-  "temperature": 0.7
+  "temperature": 0.7,
+  "autonomous_mode": "auto"
 }
 ```
+
+`autonomous_mode`:
+- `auto` (по умолчанию): для action-like сообщений (`установи`, `скачай`, `install`, `pip install` и т.п.) запускается автономное выполнение через sandbox/task pipeline.
+- `force`: всегда запускать автономное выполнение для последнего user-сообщения.
+- `off`: отключить автономное выполнение и использовать только text chat.
 
 **Response:**
 ```json
 {
   "response": "Привет! Чем могу помочь?",
   "memory_used": true,
-  "context_items": 3
+  "context_items": 3,
+  "autonomous": {
+    "triggered": true,
+    "task_id": "...",
+    "language": "bash",
+    "code": "echo installed",
+    "exit_code": 0,
+    "status": "SUCCESS",
+    "stdout": "installed",
+    "stderr": ""
+  }
 }
 ```
+
+Глобальный флаг: `CHAT_AUTONOMY_ENABLED=1` (по умолчанию включён). Если `0`, автономный путь не выполняется.
+
+Системный промпт чата по умолчанию задаёт русский язык как приоритетный: ассистент отвечает на русском, а на другие языки переключается только по явному запросу пользователя.
 
 #### POST /api/chat/feedback
 
@@ -46,6 +66,8 @@ Base URL: `http://localhost:8000`
   "message": "Обратная связь записана"
 }
 ```
+
+> Week 1 retrieval rollout: `POST /api/chat` can use either `legacy` memory retrieval (default) or a multimodal retriever when `MULTIMODAL_RAG_ENABLED=1` and backend runtime injects `app.state.multimodal_retriever`.
 
 ### Memory Endpoints
 
@@ -136,9 +158,11 @@ Base URL: `http://localhost:8000`
   "id": "abc123",
   "filename": "book.txt",
   "size": 102400,
-  "status": "uploaded"
+  "status": "uploaded",
+  "retrieval_job_id": "rj_abc123"
 }
 ```
+- `retrieval_job_id` может быть `null`, если retrieval job state не инициализирован.
 
 #### GET /api/books/list
 
@@ -369,6 +393,163 @@ goal: "print(2+2)"               -> heuristic language=python
 }
 ```
 
+
+## Companion API (Port 8000)
+
+Base URL: `http://localhost:8000`
+
+### GET /api/companion/session
+
+Текущая сессионная политика поведения ассистента (`reasoning_mode`, `challenge_mode`, `initiative_mode`, `voice_mode`).
+
+### PATCH /api/companion/session
+
+Частичное обновление сессионной политики.
+
+Пример:
+```json
+{
+  "reasoning_mode": "wild",
+  "challenge_mode": "strict",
+  "initiative_mode": "proactive",
+  "voice_mode": "ptt"
+}
+```
+
+### GET /api/companion/last-response-trace
+
+Последний explainability trace по ответу ассистента. До появления ответа может вернуть `null`.
+
+Примечание: trace обновляется после успешного `POST /api/chat/` и отражает активные `reasoning_mode/challenge_mode`.
+Примечание: `relationship_used` в trace заполняется ID relationship-фактов, реально подмешанных в chat prompt.
+Примечание: поле `retrieval_backend` показывает источник retrieval-контекста (`legacy` или `multimodal`).
+
+### GET /api/companion/response-traces?limit=50
+
+История explainability trace (в порядке накопления) для аудита динамики поведения.
+
+### GET /api/companion/relationship-profile
+
+Получить профиль relationship memory (стиль, дебат-предпочтения, инициативность).
+
+### PATCH /api/companion/relationship-profile
+
+Частичное обновление relationship profile.
+
+Пример:
+```json
+{
+  "style": {"verbosity": "high"},
+  "debate_preferences": {"strictness": "strict"}
+}
+```
+
+### POST /api/companion/relationship-facts
+
+Добавить relationship-факт.
+
+Пример:
+```json
+{
+  "fact": "Пользователь предпочитает сначала риски",
+  "source": {"type": "chat_message", "ref_id": "msg_1"},
+  "confidence": 0.8,
+  "ttl_days": 90
+}
+```
+
+### GET /api/companion/relationship-facts?query=...&limit=...
+
+Поиск активных relationship-фактов.
+
+### POST /api/companion/relationship-facts/{fact_id}/invalidate
+
+Ручная инвалидизация relationship-факта (status -> `invalidated`).
+
+### POST /api/companion/proposals/suggest
+
+Сгенерировать инициативное предложение по теме (`topic`, опционально `context`) с учетом `initiative_mode` и `challenge_mode` текущей сессии.
+
+- При `initiative_mode=off` вернётся `400`.
+- При `initiative_mode=proactive` предложение создаётся как `unsolicited=true`.
+
+### POST /api/companion/proposals
+
+Создать инициативное предложение (`reason`, `expected_value`, `risk_level`, `stop_condition`, `unsolicited`).
+Для `unsolicited=true` применяется профильный лимит `max_unsolicited_per_hour`.
+
+### GET /api/companion/proposals?status=open&limit=20
+
+Список предложений по статусу (`open|accepted|dismissed|all`).
+
+### POST /api/companion/proposals/{proposal_id}/accept
+
+Отметить предложение как принятое.
+
+### GET /api/companion/proposals/{proposal_id}/events?limit=50
+
+Получить audit trail по инициативному предложению (`created`, `status_accepted`, `status_dismissed` и т.д.).
+
+### POST /api/companion/proposals/{proposal_id}/dismiss
+
+Отметить предложение как отклонённое.
+
+## Voice API (Port 8000)
+
+Base URL: `http://localhost:8000`
+
+### POST /api/voice/session/start
+
+Старт локальной voice-сессии.
+
+Пример:
+```json
+{
+  "mode": "ptt",
+  "stt_engine": "local_whisper_cpp",
+  "tts_engine": "local_piper"
+}
+```
+
+### POST /api/voice/session/{voice_session_id}/stop
+
+Остановка voice-сессии.
+
+### GET /api/voice/session/{voice_session_id}/health
+
+Health-статус сессии (для MVP: synthetic health snapshot).
+
+Возвращает также активную voice-конфигурацию: `mode`, `stt_engine`, `tts_engine`.
+Теперь health включает поля проверки микрофона:
+- `microphone_verified` (`true|false`)
+- `microphone_source` (источник проверки)
+- `microphone_detail` (диагностическая строка)
+
+Если микрофон не подтвержден, `input_device=not_verified` и `stt=degraded`.
+
+### PATCH /api/voice/session/{voice_session_id}/metrics
+
+Обновить наблюдаемые voice-метрики для оценки readiness (`latency_p95_ms`, `crash_free_rate`, `audio_loss_percent`, `approval_bypass_incidents`, `user_score`).
+
+### POST /api/voice/session/{voice_session_id}/microphone/verify
+
+Записать результат проверки физического микрофона для текущей voice-сессии.
+
+Пример:
+```json
+{
+  "verified": true,
+  "source": "termux_microphone_record",
+  "detail": "bytes=16384"
+}
+```
+
+### GET /api/voice/session/{voice_session_id}/go-no-go
+
+Вернуть решение `GO|NO_GO` по критериям rollout и список проваленных checks.
+
+Важно: в checks добавлен `microphone_verified_true`; без подтверждения микрофона решение будет `NO_GO`.
+
 ## Embeddings Service (Port 8001)
 
 Base URL: `http://localhost:8001`
@@ -476,3 +657,195 @@ Base URL: `http://localhost:5001`
 ## Authentication
 
 Не требуется - все локально.
+
+
+## Retrieval API (Port 8000)
+
+Base URL: `http://localhost:8000`
+
+### GET /api/retrieval/health
+
+Показывает состояние week-1 retrieval переключателя:
+- `multimodal_flag` — включен ли `MULTIMODAL_RAG_ENABLED`
+- `multimodal_injected` — подмешан ли runtime retriever в `app.state.multimodal_retriever`
+
+### POST /api/retrieval/search
+
+Единая точка retrieval-поиска (legacy/multimodal в зависимости от флага).
+
+**Request:**
+```json
+{
+  "query": "найди контекст по миграции",
+  "limit": 8
+}
+```
+
+**Response:**
+```json
+{
+  "backend": "legacy",
+  "count": 1,
+  "results": [
+    {
+      "id": "abc123",
+      "content": "...",
+      "score": 0.91
+    }
+  ]
+}
+```
+
+
+### POST /api/retrieval/index
+
+Создать indexing job (week-2 bootstrap).
+
+**Request:**
+```json
+{
+  "source_type": "book",
+  "source_ref": "book_123",
+  "process_now": true
+}
+```
+
+**Response:**
+```json
+{
+  "job_id": "rj_abc123",
+  "source_type": "book",
+  "source_ref": "book_123",
+  "status": "completed",
+  "created_at": 1730000000.0,
+  "updated_at": 1730000000.0,
+  "error": null,
+  "started_at": 1730000000.0,
+  "completed_at": 1730000000.1,
+  "attempts": 1
+}
+```
+
+### GET /api/retrieval/jobs?limit=20&status=completed
+
+Список indexing jobs (опциональный фильтр `status`: `queued|running|completed|failed`).
+
+### GET /api/retrieval/jobs/{job_id}
+
+Детали indexing job по id. Возвращает `404`, если job не найден.
+
+Примечание: при `process_now=false` в `/api/retrieval/index` job остаётся в `queued` до внешней обработки.
+
+
+### POST /api/retrieval/jobs/{job_id}/process
+
+Ручная обработка indexing job (week-2 bootstrap processing).
+
+**Request:**
+```json
+{
+  "fail_reason": null
+}
+```
+
+- Если `fail_reason` задан, job завершится со статусом `failed` и полем `error`.
+- Если `fail_reason` не задан, job перейдёт в `completed`.
+
+- Фоновый worker может автоматически обрабатывать `queued` jobs (интервал/батч настраиваются через `RETRIEVAL_WORKER_INTERVAL_SECONDS` и `RETRIEVAL_WORKER_BATCH_SIZE`).
+
+
+### GET /api/retrieval/worker-metrics
+
+Метрики фонового retrieval worker:
+- `queue_depth`, `running`, `completed`, `failed`
+- `processed_total`, `failed_total`
+- `last_processed_at`
+
+
+### GET /api/retrieval/worker/status
+
+Состояние retrieval worker (`paused`, `interval_seconds`, `batch_size`).
+
+### POST /api/retrieval/worker/control
+
+Управление worker паузой/возобновлением.
+
+**Request:**
+```json
+{
+  "paused": true
+}
+```
+
+
+### POST /api/retrieval/worker/run-once?max_jobs=10
+
+Ручной единичный прогон retrieval worker для локальной отладки.
+
+**Response:**
+```json
+{
+  "processed": 3,
+  "queue_depth": 7
+}
+```
+
+
+## Week 3 quick usage (простыми словами)
+
+1. Загружаете файл через `POST /api/books/upload` — появится `retrieval_job_id`.
+2. Проверяете очередь через `GET /api/retrieval/worker-metrics` (`queue_depth`).
+3. Если нужно временно остановить автопроцессинг: `POST /api/retrieval/worker/control` с `{"paused": true}`.
+4. Хотите вручную обработать часть очереди: `POST /api/retrieval/worker/run-once?max_jobs=5`.
+5. Включаете автопроцессинг обратно: `POST /api/retrieval/worker/control` с `{"paused": false}`.
+
+
+## Online Tools API (optional internet access)
+
+Base URL: `http://localhost:8000`
+
+Enable with environment variable:
+
+```bash
+export ENABLE_ONLINE_TOOLS=1
+```
+
+### `GET /api/online/health`
+Returns whether online tools are enabled.
+
+### `POST /api/online/search`
+Request:
+
+```json
+{ "query": "latest python release", "limit": 3 }
+```
+
+Response:
+
+```json
+{
+  "enabled": true,
+  "query": "latest python release",
+  "results": [
+    { "title": "...", "snippet": "...", "url": "https://..." }
+  ]
+}
+```
+
+### `POST /api/online/download`
+Request:
+
+```json
+{ "url": "https://example.com/tool.sh", "filename": "tool.sh" }
+```
+
+Response:
+
+```json
+{
+  "enabled": true,
+  "path": "/home/.../roampal-android/downloads/tool.sh",
+  "filename": "tool.sh",
+  "size_bytes": 12345
+}
+```

@@ -48,6 +48,47 @@ cd ~/roampal-android
 bash termux/full-smoke.sh
 ```
 
+### Voice readiness-check на устройстве
+```bash
+cd ~/roampal-android
+# Базовый прогон (PTT, женский голос, GO-метрики по умолчанию)
+bash termux/voice-readiness-check.sh
+
+# Строгий режим: завершится с code=1, если решение не GO
+MODE=duplex VOICE_GENDER=male bash termux/voice-readiness-check.sh --strict
+
+# сохранить JSON-отчёт прогона
+bash termux/voice-readiness-check.sh --json-out logs/voice-readiness.json
+
+# требовать подтверждение физического микрофона (Termux:API/arecord)
+bash termux/voice-readiness-check.sh --require-mic
+
+# если прямой probe недоступен, скрипт в интерактивном TTY предложит ручное подтверждение
+# (ответьте y, если видите реальную активность микрофона на устройстве)
+bash termux/voice-readiness-check.sh
+
+# ручной override, если физическая проверка недоступна в текущем окружении
+bash termux/voice-readiness-check.sh --manual-mic-ok
+```
+
+### Настройка микрофона в Termux (обязательно для auto preflight)
+```bash
+cd ~/roampal-android
+
+# 1) установить Termux:API CLI
+pkg update && pkg install -y termux-api
+
+# 2) выдать Android-разрешение RECORD_AUDIO для приложения Termux
+#    Android Settings -> Apps -> Termux -> Permissions -> Microphone -> Allow
+
+# 3) базовый тест записи (должен отработать без ошибки permissions)
+termux-microphone-record -d 2
+```
+
+Если `termux-microphone-record` недоступен или не может создать временный файл в `/tmp`,
+`voice-readiness-check.sh` автоматически использует fallback-директории (`$TMPDIR`, `$HOME/tmp`,
+`/data/data/com.termux/files/usr/tmp`, `/tmp`).
+
 Если видите "Ошибка соединения с сервером", запустите диагностику:
 ```bash
 cd ~/roampal-android
@@ -55,11 +96,68 @@ bash termux/diagnose.sh
 ```
 
 
+### Включение интернет-поиска и скачивания инструментов
+```bash
+cd ~/roampal-android
+export ENABLE_ONLINE_TOOLS=1
+
+# Поиск из API
+curl -sS -X POST http://127.0.0.1:8000/api/online/search \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"latest python release","limit":3}'
+
+# Скачать файл/инструмент в ~/roampal-android/downloads
+curl -sS -X POST http://127.0.0.1:8000/api/online/download \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com/tool.sh","filename":"tool.sh"}'
+```
+
+Для чата интернет-контекст можно подтягивать префиксами `web:` или `search:`
+(например: `web: свежие новости по llama.cpp`).
+
+### Проверка, что модель не выходит в интернет
+```bash
+cd ~/roampal-android
+bash termux/check-no-internet-leak.sh
+
+# строгий режим (exit code != 0 при подозрительных внешних соединениях)
+STRICT=1 bash termux/check-no-internet-leak.sh
+```
+
+Скрипт делает preflight локальных endpoint-ов и снимает snapshot сокетов (`ss -tpn`) во время chat-запроса.
+Отчёты сохраняются в `logs/net-leak-report-*.json` и `logs/net-sockets-*.log`.
+
 ### Проверка целостности репозитория (GitHub/ветка)
 ```bash
 cd ~/roampal-android
 bash termux/verify-repo-integrity.sh ~/roampal-android work
 ```
+
+### Полная очистка памяти
+```bash
+cd ~/roampal-android
+bash termux/reset-all-memory.sh
+```
+
+Скрипт полностью очищает локальную память (`~/roampal-android/data/memory`) и companion-базу (`backend/core/logs/companion.db`). После выполнения перезапустите core-сервис.
+
+
+### Единая полная проверка (end-to-end)
+```bash
+cd ~/roampal-android
+bash scripts/full-end-to-end-check.sh
+```
+
+Этот скрипт запускается из корня репозитория и выполняет:
+- быструю проверку синтаксиса ключевых backend-модулей;
+- единый интеграционный smoke-тест `backend/core/tests/test_full_system_check.py`.
+
+После запуска формируются подробные артефакты в `logs/`:
+- `full-end-to-end-check-*.log` — полный лог выполнения;
+- `full-end-to-end-check-*.summary.txt` — краткий итог по шагам;
+- `full-end-to-end-check-*.json` — структурированный отчёт (удобно переслать).
+
+Если в окружении нет `pytest` (включая Poetry-окружение), скрипт автоматически установит минимальные test-зависимости (`pytest`, `python-multipart`, `aiofiles`) и затем запустит smoke-тест.
 
 ### 5. Автоматическое развертывание (рекомендуется)
 ```bash
@@ -80,6 +178,8 @@ bash termux/deploy.sh work
 - ✅ Песочница для выполнения кода
 - ✅ Векторный поиск и эмбеддинги
 - ✅ MCP интеграция
+- ✅ Companion session API (STABLE/WILD, challenge/initiative/voice modes)
+- ✅ Voice control-plane API (start/stop/health for local voice sessions)
 - ✅ 100% локально, без облака
 
 ## Структура
@@ -101,6 +201,10 @@ data/            - Персистентные данные
 - [API](docs/api.md)
 - [Handoff v2](docs/handoff-v2.md)
 - [Companion Vision (STABLE/WILD, personality, voice)](docs/companion-vision.md)
+- [Companion Implementation Plan (API + DB + Voice Go/No-Go)](docs/companion-implementation-plan.md)
+- [Multimodal RAG Week 1 Plan](docs/multimodal-rag-week1.md)
+- [Multimodal RAG Week 2 Plan](docs/multimodal-rag-week2.md)
+- [Multimodal RAG Week 3 Plan](docs/multimodal-rag-week3.md)
 
 ## Backend dependency management
 

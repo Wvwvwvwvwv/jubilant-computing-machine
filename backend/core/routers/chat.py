@@ -1,12 +1,22 @@
+import os
+from typing import List, Optional
+import uuid
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from typing import List
 
+from backend.core.services.companion_memory import CompanionMemory
+from backend.core.services.companion_state import CompanionState
 from backend.core.services.kobold_client import KoboldClient
 from backend.core.services.memory_engine import MemoryEngine
+from backend.core.services.task_planner import TaskPlanner
+from backend.core.routers.sandbox import CodeExecutionRequest, execute_code
+from backend.core.services.retrieval import search_with_backend
+from backend.core.services.online_tools import online_tools_enabled, web_search
 
 router = APIRouter()
 kobold = KoboldClient()
+task_planner = TaskPlanner()
 
 
 class ChatMessage(BaseModel):
@@ -19,12 +29,80 @@ class ChatRequest(BaseModel):
     use_memory: bool = True
     max_tokens: int = 512
     temperature: float = 0.7
+    autonomous_mode: str = "auto"  # off | auto | force
+
+
+class AutonomousExecution(BaseModel):
+    triggered: bool
+    task_id: Optional[str] = None
+    language: Optional[str] = None
+    code: Optional[str] = None
+    exit_code: Optional[int] = None
+    status: Optional[str] = None
+    stdout: str = ""
+    stderr: str = ""
 
 
 class ChatResponse(BaseModel):
     response: str
     memory_used: bool
     context_items: int
+    autonomous: Optional[AutonomousExecution] = None
+
+
+MAX_CHAT_HISTORY_MESSAGES = 14
+MAX_MEMORY_CONTEXT_ITEMS = 3
+
+
+def _normalize_text(text: str) -> str:
+    return " ".join((text or "").split()).strip().lower()
+
+
+def trim_chat_history(messages: List[ChatMessage], max_messages: int = MAX_CHAT_HISTORY_MESSAGES) -> List[ChatMessage]:
+    """Keep recent history while preserving any system messages already injected."""
+    if len(messages) <= max_messages:
+        return messages
+
+    system_msgs = [m for m in messages if m.role == "system"]
+    non_system = [m for m in messages if m.role != "system"]
+    keep_non_system = non_system[-max_messages:]
+    return [*system_msgs, *keep_non_system]
+
+
+def _insertion_index_before_last_user(messages: List[ChatMessage]) -> int:
+    """Insert context right before the latest user turn; fallback to append."""
+    for idx in range(len(messages) - 1, -1, -1):
+        if messages[idx].role == "user":
+            return idx
+    return len(messages)
+
+
+def build_memory_context_items(items: list[dict], limit: int = MAX_MEMORY_CONTEXT_ITEMS) -> list[str]:
+    """Return compact, deduplicated memory snippets suitable for prompt injection."""
+    filtered: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        raw = str(item.get("content", "") or "").strip()
+        if not raw:
+            continue
+        lowered = raw.lower()
+        if "smoke memory item" in lowered or "system: answer to" in lowered:
+            continue
+        normalized = _normalize_text(raw)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        filtered.append(raw[:500])
+        if len(filtered) >= limit:
+            break
+    return filtered
+
+
+def build_memory_context_block(items: list[dict], limit: int = MAX_MEMORY_CONTEXT_ITEMS) -> str:
+    """Deduplicate noisy memory items and keep only compact relevant snippets."""
+    filtered = build_memory_context_items(items, limit=limit)
+
+    return "\n\n".join([f"[Память {i + 1}]: {text}" for i, text in enumerate(filtered)])
 
 
 def serialize_messages(messages: List[ChatMessage]) -> List[dict]:
@@ -40,41 +118,255 @@ def serialize_messages(messages: List[ChatMessage]) -> List[dict]:
     return serialized
 
 
+def build_companion_behavior_message(session) -> ChatMessage:
+    mode = session.reasoning_mode
+    challenge = session.challenge_mode
+    mode_clause = (
+        "Режим STABLE: отвечай структурно, аккуратно, с явной маркировкой неопределённости."
+        if mode == "stable"
+        else "Режим WILD: предлагай смелые гипотезы, но маркируй их как требующие проверки."
+    )
+
+    if challenge == "strict":
+        challenge_clause = "Обязательно приводи контрпозицию и проверяемые риски перед рекомендацией."
+    elif challenge == "balanced":
+        challenge_clause = "Если уместно, приводи краткую контрпозицию и ключевые риски."
+    else:
+        challenge_clause = "Не добавляй контрпозицию без явной необходимости."
+
+    return ChatMessage(
+        role="system",
+        content=(
+            "Политика поведения companion:\n"
+            f"- {mode_clause}\n"
+            f"- {challenge_clause}\n"
+            "- Разделяй факты, гипотезы и неизвестное."
+        ),
+    )
+
+
+def build_relationship_memory_message(facts: list[dict]) -> ChatMessage:
+    lines = [f"[Fact {x['fact_id']}]: {x['fact']}" for x in facts]
+    return ChatMessage(
+        role="system",
+        content=(
+            "Память отношений (используй как персональные предпочтения пользователя, если релевантно):\n"
+            + "\n".join(lines)
+        ),
+    )
+
+
+
+
+async def search_memory_context(req: Request, memory_engine: MemoryEngine, query_text: str, limit: int = 8) -> tuple[list[dict], str]:
+    """Resolve active retriever backend (legacy by default, multimodal by flag)."""
+    mm_retriever = getattr(req.app.state, "multimodal_retriever", None)
+    return await search_with_backend(
+        memory_engine=memory_engine,
+        query_text=query_text,
+        limit=limit,
+        multimodal_retriever=mm_retriever,
+    )
+
+
+
+def _online_search_triggered(text: str) -> bool:
+    lowered = (text or "").strip().lower()
+    return lowered.startswith("web:") or lowered.startswith("search:")
+
+
+async def build_online_context(query_text: str) -> str:
+    if not online_tools_enabled() or not _online_search_triggered(query_text):
+        return ""
+
+    cleaned = query_text.split(":", 1)[1].strip() if ":" in query_text else query_text
+    if not cleaned:
+        return ""
+
+    results = await web_search(cleaned, limit=3)
+    if not results:
+        return ""
+
+    lines = []
+    for idx, item in enumerate(results, start=1):
+        title = item.get("title") or "Result"
+        snippet = item.get("snippet") or ""
+        url = item.get("url") or ""
+        lines.append(f"[{idx}] {title}\n{snippet}\n{url}".strip())
+
+    return "\n\n".join(lines)
+
+def infer_uncertainty_markers(text: str) -> list[str]:
+    lowered = (text or "").lower()
+    markers = []
+    if any(x in lowered for x in ["не уверен", "недостаточно данных", "неизвестно", "uncertain"]):
+        markers.append("insufficient_data")
+    if any(x in lowered for x in ["гипотез", "предполож", "возможно", "likely"]):
+        markers.append("hypothesis_present")
+    return markers
+
+
+def _autonomy_enabled() -> bool:
+    return os.getenv("CHAT_AUTONOMY_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _looks_like_actionable_task(query_text: str) -> bool:
+    lowered = (query_text or "").lower()
+    markers = [
+        "установ", "скачай", "запусти", "выполни", "установи", "install", "download", "run ", "execute",
+        "pip install", "pkg install", "apt install", "python3", "python 3",
+    ]
+    return any(m in lowered for m in markers)
+
+
+def _should_run_autonomy(mode: str, query_text: str) -> bool:
+    normalized = (mode or "auto").strip().lower()
+    if normalized == "off":
+        return False
+    if normalized == "force":
+        return True
+    return _looks_like_actionable_task(query_text)
+
+
+async def _run_autonomous_task(req: Request, query_text: str) -> AutonomousExecution:
+    runner = getattr(req.app.state, "task_runner", None)
+    if runner is None:
+        return AutonomousExecution(triggered=False, stderr="task_runner is not initialized")
+
+    rec = runner.create_task(goal=query_text, max_attempts=1, approval_required=False)
+    if rec.approval_required and not rec.approved:
+        rec = runner.approve_task(rec.task_id)
+
+    plan = await task_planner.build_plan(rec.goal)
+    try:
+        result = await execute_code(CodeExecutionRequest(code=plan.code, language=plan.language, timeout=plan.timeout))
+        updated = runner.run_with_result(
+            task_id=rec.task_id,
+            exit_code=result.exit_code,
+            stdout=result.stdout or "",
+            stderr=result.stderr or "",
+            started_payload={"tool": plan.tool, "language": plan.language},
+        )
+        return AutonomousExecution(
+            triggered=True,
+            task_id=rec.task_id,
+            language=plan.language,
+            code=plan.code,
+            exit_code=result.exit_code,
+            status=updated.status.value,
+            stdout=result.stdout or "",
+            stderr=result.stderr or "",
+        )
+    except HTTPException as exc:
+        exit_code = 124 if exc.status_code == 408 else 1
+        updated = runner.run_with_result(
+            task_id=rec.task_id,
+            exit_code=exit_code,
+            stdout="",
+            stderr=str(exc.detail),
+            started_payload={"tool": plan.tool, "language": plan.language},
+        )
+        return AutonomousExecution(
+            triggered=True,
+            task_id=rec.task_id,
+            language=plan.language,
+            code=plan.code,
+            exit_code=exit_code,
+            status=updated.status.value,
+            stdout="",
+            stderr=str(exc.detail),
+        )
+
+
+@router.post("", response_model=ChatResponse)
 @router.post("/", response_model=ChatResponse)
 async def chat(request: ChatRequest, req: Request):
-    """Чат с LLM через KoboldCpp с использованием памяти Roampal"""
+    """Чат с LLM через KoboldCpp с использованием памяти Roampal и companion-политик."""
 
     if not request.messages:
         raise HTTPException(status_code=400, detail="messages не может быть пустым")
 
     memory_engine: MemoryEngine = req.app.state.memory_engine
+    companion_state: CompanionState | None = getattr(req.app.state, "companion_state", None)
+    companion_memory: CompanionMemory | None = getattr(req.app.state, "companion_memory", None)
+
     context_items = 0
     memory_context = []
+    retrieval_backend = "legacy"
     query_text = request.messages[-1].content
+    working_messages = list(request.messages)
+    used_relationship_ids: list[str] = []
+    active_kobold: KoboldClient = getattr(req.app.state, "kobold_client", kobold)
+    autonomous_info: Optional[AutonomousExecution] = None
+
+    # Companion behavior policy injection (mode/challenge)
+    if companion_state is not None:
+        behavior_msg = build_companion_behavior_message(companion_state.get_session())
+        working_messages.insert(0, behavior_msg)
+
+    # Relationship memory injection (top active facts)
+    if companion_memory is not None:
+        relation_facts = companion_memory.list_facts(limit=3)
+        if relation_facts:
+            relation_payload = [{"fact_id": x.fact_id, "fact": x.fact} for x in relation_facts]
+            used_relationship_ids = [x["fact_id"] for x in relation_payload]
+            working_messages.insert(1 if companion_state is not None else 0, build_relationship_memory_message(relation_payload))
 
     # Получение релевантного контекста из памяти
     if request.use_memory:
-        memory_context = await memory_engine.search(query_text, limit=5)
-        context_items = len(memory_context)
+        memory_context, retrieval_backend = await search_memory_context(req, memory_engine, query_text, limit=8)
 
         # Добавление контекста в промпт
         if memory_context:
-            context_text = "\n\n".join([
-                f"[Память {i + 1}]: {item['content']}"
-                for i, item in enumerate(memory_context)
-            ])
+            filtered_context_items = build_memory_context_items(memory_context, limit=MAX_MEMORY_CONTEXT_ITEMS)
+            context_text = "\n\n".join([f"[Память {i + 1}]: {text}" for i, text in enumerate(filtered_context_items)])
 
             # Вставка контекста перед последним сообщением
-            system_msg = ChatMessage(
-                role="system",
-                content=f"Релевантный контекст из памяти:\n{context_text}",
+            if context_text:
+                system_msg = ChatMessage(
+                    role="system",
+                    content=f"Релевантный контекст из памяти ({retrieval_backend}):\n{context_text}",
+                )
+                insertion_index = _insertion_index_before_last_user(working_messages)
+                working_messages.insert(insertion_index, system_msg)
+                context_items = len(filtered_context_items)
+
+    # Optional internet search context in chat (prefix `web:` or `search:`).
+    online_context = await build_online_context(query_text)
+    if online_context:
+        insertion_index = _insertion_index_before_last_user(working_messages)
+        working_messages.insert(
+            insertion_index,
+            ChatMessage(role="system", content=f"Актуальный интернет-контекст:\n{online_context}"),
+        )
+
+    if _autonomy_enabled() and _should_run_autonomy(request.autonomous_mode, query_text):
+        autonomous_info = await _run_autonomous_task(req, query_text)
+        if autonomous_info.triggered:
+            insertion_index = _insertion_index_before_last_user(working_messages)
+            working_messages.insert(
+                insertion_index,
+                ChatMessage(
+                    role="system",
+                    content=(
+                        "Автономное выполнение пользовательской задачи уже выполнено. "
+                        "Сформируй отчёт строго по факту выполнения.\n"
+                        f"task_id: {autonomous_info.task_id}\n"
+                        f"status: {autonomous_info.status}\n"
+                        f"language: {autonomous_info.language}\n"
+                        f"exit_code: {autonomous_info.exit_code}\n"
+                        f"stdout:\n{autonomous_info.stdout[:1200]}\n"
+                        f"stderr:\n{autonomous_info.stderr[:1200]}"
+                    ),
+                ),
             )
-            request.messages.insert(-1, system_msg)
+
+    working_messages = trim_chat_history(working_messages)
 
     # Отправка в KoboldCpp
     try:
-        response = await kobold.generate(
-            messages=serialize_messages(request.messages),
+        response = await active_kobold.generate(
+            messages=serialize_messages(working_messages),
             max_tokens=request.max_tokens,
             temperature=request.temperature,
         )
@@ -87,10 +379,23 @@ async def chat(request: ChatRequest, req: Request):
                 context_used=memory_context,
             )
 
+        # Запись explainability trace в companion state
+        if companion_state is not None:
+            sess = companion_state.get_session()
+            companion_state.set_last_trace(
+                response_id=f"resp_{uuid.uuid4().hex[:12]}",
+                retrieval_backend=retrieval_backend,
+                relationship_used=used_relationship_ids,
+                uncertainty_markers=infer_uncertainty_markers(response),
+                counter_position_used=(sess.challenge_mode != "off"),
+                confidence=0.72 if sess.reasoning_mode == "stable" else 0.64,
+            )
+
         return ChatResponse(
             response=response,
             memory_used=request.use_memory,
             context_items=context_items,
+            autonomous=autonomous_info,
         )
 
     except Exception as e:
