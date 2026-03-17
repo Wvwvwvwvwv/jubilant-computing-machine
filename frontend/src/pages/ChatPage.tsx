@@ -2,14 +2,16 @@ import { useMemo, useRef, useState } from 'react'
 import { chatAPI, onlineAPI, sandboxAPI, voiceAPI } from '../api/client'
 import { useAppState } from '../state/AppState'
 
-const AGENT_PROMPT = [
-  'Ты локальный автономный агент Roampal.',
-  'Никакого ручного подтверждения: сам выбирай web_search и sandbox при любых action-oriented запросах.',
-  'Если задача содержит поиск/скачивание/анализ/установку/изменение/запуск/проверку, сначала собери контекст, затем выполни действие и верни итог.',
-  'Пиши кратко: шаги, результат, риски.'
+// System policy injected into every chat request.
+const AGENT_SYSTEM_PROMPT = [
+  'You are Roampal autonomous local agent.',
+  'No manual confirmation, no extra planners. You decide tool usage yourself.',
+  'For action-oriented user intents, automatically use web_search and sandbox, then return concise final summary.',
+  'Action intents include: find/search, download, inspect, уточни, install, convert, modify, run, verify, analyze.'
 ].join('\n')
 
-const ACTION_RE = /(найди|скачай|поищи|посмотри|уточни|установи|конвертируй|измени|запустить|запусти|проверь|разбери|проанализируй|search|download|install|convert|run|analy[sz]e)/i
+const ACTION_INTENT_RE =
+  /(найди|скачай|поищи|посмотри|уточни|установи|конвертируй|измени|запустить|запусти|проверь|разбери|проанализируй|find|search|download|inspect|install|convert|modify|run|verify|analy[sz]e)/i
 
 type BrowserRecognition = {
   lang: string
@@ -23,114 +25,110 @@ type BrowserRecognition = {
   stop: () => void
 }
 
-function safeSpeak(text: string) {
+function speak(text: string) {
   if (!('speechSynthesis' in window)) return
   window.speechSynthesis.cancel()
-  const utterance = new SpeechSynthesisUtterance(text.slice(0, 400))
-  utterance.lang = 'ru-RU'
-  window.speechSynthesis.speak(utterance)
+  const u = new SpeechSynthesisUtterance(text.slice(0, 500))
+  u.lang = 'ru-RU'
+  window.speechSynthesis.speak(u)
 }
 
 export default function ChatPage() {
-  const {
-    dialogs,
-    activeDialogId,
-    appendDialogMessage,
-    appendTerminalLine,
-    setActiveTab,
-    selectedModel
-  } = useAppState()
+  const { dialogs, activeDialogId, appendDialogMessage, appendTerminalLine, setActiveTab, selectedModel } = useAppState()
 
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [voiceSessionId, setVoiceSessionId] = useState<string | null>(null)
   const [listening, setListening] = useState(false)
+  const [voiceSessionId, setVoiceSessionId] = useState<string | null>(null)
   const recognitionRef = useRef<BrowserRecognition | null>(null)
 
   const activeDialog = useMemo(() => dialogs.find((d) => d.id === activeDialogId), [dialogs, activeDialogId])
   const messages = activeDialog?.messages || []
 
-  const runSandboxWithPolling = async (code: string, language: string = 'python', timeout = 120) => {
+  const runSandboxLive = async (code: string) => {
     let running = true
-    const pollId = window.setInterval(() => {
-      if (!running) return
-      appendTerminalLine({ stream: 'system', text: '...sandbox still running (poll: 1s)' })
+    const poll = window.setInterval(() => {
+      if (running) appendTerminalLine({ stream: 'system', text: 'sandbox running... (poll 1s)' })
     }, 1000)
 
     try {
-      const result = await sandboxAPI.execute(code, language, timeout)
+      const result = await sandboxAPI.execute(code, 'python', 120)
       appendTerminalLine({ stream: result.exit_code === 0 ? 'stdout' : 'stderr', text: `exit_code=${result.exit_code}` })
       if (result.stdout) appendTerminalLine({ stream: 'stdout', text: result.stdout })
       if (result.stderr) appendTerminalLine({ stream: 'stderr', text: result.stderr })
       return result
     } finally {
       running = false
-      window.clearInterval(pollId)
+      window.clearInterval(poll)
     }
   }
 
-  const executeAgentPipeline = async (userText: string) => {
-    const triggered = ACTION_RE.test(userText)
-    if (!triggered) return { triggered: false }
+  const autoTools = async (text: string) => {
+    if (!ACTION_INTENT_RE.test(text)) return null
 
     setActiveTab('terminal')
-    appendTerminalLine({ stream: 'system', text: `[agent] trigger detected: ${userText}` })
+    appendTerminalLine({ stream: 'system', text: `[agent] action intent detected: ${text}` })
 
-    const search = await onlineAPI.search(userText, 3)
-    const results = Array.isArray(search?.results) ? search.results : []
-    appendTerminalLine({ stream: 'system', text: `[agent] web_search returned ${results.length} items` })
+    const searchResp = await onlineAPI.search(text, 3)
+    const results = Array.isArray(searchResp?.results) ? searchResp.results : []
+    appendTerminalLine({ stream: 'system', text: `[agent] web_search results=${results.length}` })
 
-    const scriptLines = [
-      "import json",
-      "print('AGENT: starting automated analysis')",
-      `query = ${JSON.stringify(userText)}`,
+    // Script intentionally mirrors tool usage for transparent terminal output.
+    const code = [
+      "print('AGENT TOOL PIPELINE START')",
+      `query = ${JSON.stringify(text)}`,
       `results = ${JSON.stringify(results)}`,
-      "print('QUERY:', query)",
-      "for idx, item in enumerate(results, 1):",
-      "    title = item.get('title', 'Result')",
-      "    url = item.get('url', '')",
-      "    print(f'[{idx}] {title} -> {url}')",
-      "print('AGENT: completed analysis')"
-    ]
+      "print('query:', query)",
+      "for i, item in enumerate(results, 1):",
+      "    print(f'[{i}] {item.get(\"title\", \"Result\")} | {item.get(\"url\", \"\")}')",
+      "print('AGENT TOOL PIPELINE END')"
+    ].join('\n')
 
-    const sandbox = await runSandboxWithPolling(scriptLines.join('\n'))
-    return { triggered: true, results, sandbox }
+    const sandboxResp = await runSandboxLive(code)
+    return { results, sandboxResp }
   }
 
-  const sendMessage = async (rawText?: string, source: 'text' | 'voice' = 'text') => {
-    const content = (rawText ?? input).trim()
-    if (!content || loading || !activeDialog) return
+  const sendMessage = async (raw?: string, source: 'text' | 'voice' = 'text') => {
+    const text = (raw ?? input).trim()
+    if (!text || loading || !activeDialog) return
 
-    appendDialogMessage(activeDialog.id, { role: 'user', content })
+    appendDialogMessage(activeDialog.id, { role: 'user', content: text })
     if (source === 'text') setInput('')
     setLoading(true)
 
     try {
-      const agentContext = await executeAgentPipeline(content)
+      const tools = await autoTools(text)
 
-      const dialogNow = dialogs.find((d) => d.id === activeDialog.id) || activeDialog
       const payloadMessages = [
-        { role: 'system', content: AGENT_PROMPT },
-        { role: 'system', content: `Текущая модель: ${selectedModel}` },
-        ...dialogNow.messages.map((m) => ({ role: m.role, content: m.content }))
+        { role: 'system', content: AGENT_SYSTEM_PROMPT },
+        { role: 'system', content: `Selected model: ${selectedModel}` },
+        ...[...messages, { id: 'tmp_user', role: 'user' as const, content: text, createdAt: Date.now() }].map((m) => ({
+          role: m.role,
+          content: m.content
+        }))
       ]
 
-      if (agentContext.triggered) {
-        const summary = {
-          search_count: agentContext.results.length,
-          sandbox_exit_code: agentContext.sandbox?.exit_code,
-          sandbox_stdout_tail: String(agentContext.sandbox?.stdout || '').slice(-500),
-          sandbox_stderr_tail: String(agentContext.sandbox?.stderr || '').slice(-500)
-        }
-        payloadMessages.push({ role: 'system', content: `AGENT_TOOL_CONTEXT: ${JSON.stringify(summary)}` })
+      if (tools) {
+        payloadMessages.push({
+          role: 'system',
+          content: `TOOL_CONTEXT: ${JSON.stringify({
+            web_results: tools.results.length,
+            sandbox_exit_code: tools.sandboxResp?.exit_code,
+            sandbox_stdout_tail: String(tools.sandboxResp?.stdout || '').slice(-700),
+            sandbox_stderr_tail: String(tools.sandboxResp?.stderr || '').slice(-700)
+          })}`
+        })
       }
 
       const response = await chatAPI.send(payloadMessages, true)
-      const text = response?.response || 'Пустой ответ от модели.'
-      appendDialogMessage(activeDialog.id, { role: 'assistant', content: text })
-      safeSpeak(text)
+      const answer = response?.response || 'No response'
+      appendDialogMessage(activeDialog.id, { role: 'assistant', content: answer })
+      speak(answer)
     } catch (error: any) {
-      appendDialogMessage(activeDialog.id, { role: 'assistant', content: `❌ ${error?.response?.data?.detail || error?.message || 'chat error'}` })
+      appendDialogMessage(activeDialog.id, {
+        role: 'assistant',
+        content: `❌ ${error?.response?.data?.detail || error?.message || 'request failed'}`
+      })
     } finally {
       setLoading(false)
     }
@@ -145,13 +143,18 @@ export default function ChatPage() {
       return
     }
 
-    const session = await voiceAPI.startSession('duplex', 'female')
-    setVoiceSessionId(session.voice_session_id)
-    await voiceAPI.verifyMicrophone(session.voice_session_id, true, 'browser_speech', 'local_whisper_cpp control-plane active')
+    const voiceSession = await voiceAPI.startSession('duplex', 'female')
+    setVoiceSessionId(voiceSession.voice_session_id)
+    await voiceAPI.verifyMicrophone(
+      voiceSession.voice_session_id,
+      true,
+      'browser_speech_recognition',
+      'voice command path active'
+    )
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
     if (!SpeechRecognition) {
-      appendDialogMessage(activeDialogId, { role: 'assistant', content: '❌ SpeechRecognition not supported in this browser.' })
+      appendDialogMessage(activeDialogId, { role: 'assistant', content: '❌ SpeechRecognition is not supported.' })
       return
     }
 
@@ -160,50 +163,58 @@ export default function ChatPage() {
     rec.interimResults = false
     rec.maxAlternatives = 1
     rec.continuous = true
+
     rec.onresult = (event: any) => {
       const transcript = event.results?.[event.results.length - 1]?.[0]?.transcript?.trim()
       if (transcript) void sendMessage(transcript, 'voice')
     }
     rec.onerror = () => setListening(false)
     rec.onend = () => setListening(false)
+
     rec.start()
     recognitionRef.current = rec
     setListening(true)
   }
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
+    <div className="h-full flex flex-col overflow-hidden bg-white">
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
         {messages.map((msg) => (
-          <div key={msg.id} className={`max-w-[85%] rounded px-3 py-2 text-sm whitespace-pre-wrap ${msg.role === 'user' ? 'ml-auto bg-blue-600' : 'bg-neutral-800'}`}>
+          <div
+            key={msg.id}
+            className={`max-w-[85%] whitespace-pre-wrap rounded-xl px-3 py-2 text-sm ${
+              msg.role === 'user' ? 'ml-auto bg-blue-600 text-white' : 'bg-neutral-100 text-neutral-900'
+            }`}
+          >
             {msg.content}
           </div>
         ))}
       </div>
 
-      <div className="border-t border-neutral-800 p-3 flex gap-2">
+      <div className="shrink-0 border-t border-neutral-200 p-2 flex gap-2">
         <button
           onClick={() => void toggleVoice()}
-          className={`rounded px-3 py-2 text-sm ${listening ? 'bg-red-600' : 'bg-neutral-700'}`}
-          title="PTT/continuous voice"
+          className={`rounded-md px-3 py-2 text-sm text-white ${listening ? 'bg-red-600' : 'bg-neutral-700'}`}
         >
-          {listening ? '🎙️ stop' : '🎤 voice'}
+          {listening ? '🎙 stop' : '🎤 voice'}
         </button>
+
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') void sendMessage()
           }}
-          placeholder="Введите сообщение или команду..."
-          className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
+          placeholder="Type message or command..."
+          className="min-w-0 flex-1 rounded-md border border-neutral-300 px-3 py-2 text-sm"
         />
+
         <button
-          disabled={loading}
           onClick={() => void sendMessage()}
-          className="rounded bg-blue-600 px-4 py-2 text-sm disabled:opacity-60"
+          disabled={loading}
+          className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-60"
         >
-          {loading ? '...' : 'Отправить'}
+          {loading ? '...' : 'Send'}
         </button>
       </div>
     </div>
