@@ -1,6 +1,13 @@
 import httpx
 from typing import List, Dict
 
+
+DEFAULT_SYSTEM_PROMPT = (
+    "Системная инструкция: основной язык ответа — русский. "
+    "Отвечай только на русском языке, если пользователь явно не попросил другой язык. "
+    "Если пользователь запрашивает другой язык, переключайся только для этого запроса."
+)
+
 class KoboldClient:
     """Клиент для KoboldCpp API"""
     
@@ -47,19 +54,19 @@ class KoboldClient:
     
     def _format_messages(self, messages: List[Dict]) -> str:
         """Форматирование сообщений в промпт"""
-        
-        formatted = []
+
+        formatted = [f"System: {DEFAULT_SYSTEM_PROMPT}"]
         for msg in messages:
             role = msg.get("role", "user")
             content = msg.get("content", "")
-            
+
             if role == "system":
                 formatted.append(f"System: {content}")
             elif role == "user":
                 formatted.append(f"User: {content}")
             elif role == "assistant":
                 formatted.append(f"Assistant: {content}")
-        
+
         formatted.append("Assistant:")
         return "\n\n".join(formatted)
     
