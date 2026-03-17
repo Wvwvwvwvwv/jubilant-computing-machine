@@ -38,6 +38,10 @@ warn_unused_configs = true
 check_untyped_defs = false
 pretty = true
 
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
 [tool.ruff]
 line-length = 100
 
