@@ -1,8 +1,8 @@
 import { useMemo, useRef, useState } from 'react'
+import { Mic, ArrowRight, Plus } from 'lucide-react'
 import { chatAPI, onlineAPI, sandboxAPI, voiceAPI } from '../api/client'
 import { useAppState } from '../state/AppState'
 
-// Hard system policy for model-driven autonomous tool usage.
 const AGENT_SYSTEM_PROMPT = [
   'You are Roampal autonomous local agent.',
   'No manual confirmations and no additional planners.',
@@ -26,14 +26,6 @@ type BrowserRecognition = {
   stop: () => void
 }
 
-function speak(text: string) {
-  if (!('speechSynthesis' in window)) return
-  window.speechSynthesis.cancel()
-  const utterance = new SpeechSynthesisUtterance(text.slice(0, 500))
-  utterance.lang = 'ru-RU'
-  window.speechSynthesis.speak(utterance)
-}
-
 function buildSandboxScript(query: string, results: Array<Record<string, any>>) {
   return [
     'from datetime import datetime',
@@ -49,17 +41,12 @@ function buildSandboxScript(query: string, results: Array<Record<string, any>>) 
     "    url = item.get('url', '')",
     "    log(f'[{idx}] {title} -> {url}')",
     "log('$ sandbox analyze')",
-    "if results:",
-    "    log('analysis: using first results as context for autonomous decision')",
-    "else:",
-    "    log('analysis: no web results, fallback to local reasoning')",
     "log('$ done')"
   ].join('\n')
 }
 
 export default function ChatPage() {
   const { dialogs, activeDialogId, appendDialogMessage, appendTerminalLine, setActiveTab, selectedModel } = useAppState()
-
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [listening, setListening] = useState(false)
@@ -90,39 +77,29 @@ export default function ChatPage() {
 
   const autoToolsIfNeeded = async (text: string) => {
     if (!ACTION_INTENT_RE.test(text)) return null
-
     setActiveTab('terminal')
     appendTerminalLine({ stream: 'system', text: '$ agent detect-action-intent' })
-
     appendTerminalLine({ stream: 'system', text: '$ web_search' })
     const searchResp = await onlineAPI.search(text, 5)
     const results = Array.isArray(searchResp?.results) ? searchResp.results : []
     appendTerminalLine({ stream: 'system', text: `web_search results=${results.length}` })
-
-    const script = buildSandboxScript(text, results)
-    const sandboxResp = await runSandboxLive(script)
-
+    const sandboxResp = await runSandboxLive(buildSandboxScript(text, results))
     return { results, sandboxResp }
   }
 
   const sendMessage = async (raw?: string, source: 'text' | 'voice' = 'text') => {
     const text = (raw ?? input).trim()
     if (!text || loading || !activeDialog) return
-
     appendDialogMessage(activeDialog.id, { role: 'user', content: text })
     if (source === 'text') setInput('')
     setLoading(true)
 
     try {
       const toolContext = await autoToolsIfNeeded(text)
-
       const payloadMessages: Array<{ role: string; content: string }> = [
         { role: 'system', content: AGENT_SYSTEM_PROMPT },
         { role: 'system', content: `Selected model: ${selectedModel}` },
-        ...[...messages, { id: 'tmp_user', role: 'user' as const, content: text, createdAt: Date.now() }].map((m) => ({
-          role: m.role,
-          content: m.content
-        }))
+        ...[...messages, { id: 'tmp_user', role: 'user' as const, content: text, createdAt: Date.now() }].map((m) => ({ role: m.role, content: m.content }))
       ]
 
       if (toolContext) {
@@ -138,14 +115,9 @@ export default function ChatPage() {
       }
 
       const response = await chatAPI.send(payloadMessages, true)
-      const assistantText = response?.response || 'No response'
-      appendDialogMessage(activeDialog.id, { role: 'assistant', content: assistantText })
-      speak(assistantText)
+      appendDialogMessage(activeDialog.id, { role: 'assistant', content: response?.response || 'No response' })
     } catch (error: any) {
-      appendDialogMessage(activeDialog.id, {
-        role: 'assistant',
-        content: `❌ ${error?.response?.data?.detail || error?.message || 'request failed'}`
-      })
+      appendDialogMessage(activeDialog.id, { role: 'assistant', content: `❌ ${error?.response?.data?.detail || error?.message || 'request failed'}` })
     } finally {
       setLoading(false)
     }
@@ -162,49 +134,35 @@ export default function ChatPage() {
 
     const voiceSession = await voiceAPI.startSession('duplex', 'female')
     setVoiceSessionId(voiceSession.voice_session_id)
-    await voiceAPI.verifyMicrophone(
-      voiceSession.voice_session_id,
-      true,
-      'browser_speech_recognition',
-      'voice command path active'
-    )
+    await voiceAPI.verifyMicrophone(voiceSession.voice_session_id, true, 'browser_speech_recognition', 'voice command path active')
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-    if (!SpeechRecognition) {
-      appendDialogMessage(activeDialogId, { role: 'assistant', content: '❌ SpeechRecognition is not supported.' })
-      return
-    }
+    if (!SpeechRecognition) return
 
     const rec: BrowserRecognition = new SpeechRecognition()
     rec.lang = 'ru-RU'
     rec.interimResults = false
     rec.maxAlternatives = 1
     rec.continuous = true
-
     rec.onresult = (event: any) => {
       const transcript = event.results?.[event.results.length - 1]?.[0]?.transcript?.trim()
       if (transcript) void sendMessage(transcript, 'voice')
     }
     rec.onerror = () => setListening(false)
     rec.onend = () => setListening(false)
-
     rec.start()
     recognitionRef.current = rec
     setListening(true)
   }
 
   return (
-    <div className="h-full flex flex-col overflow-hidden bg-white">
-      <div className="shrink-0 border-b border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-600">
-        Chat workspace · autonomous mode · model: {selectedModel}
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-neutral-100/70">
+    <div className="h-full flex flex-col overflow-hidden bg-[#0f0f10]">
+      <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {messages.map((msg) => (
           <div
             key={msg.id}
-            className={`max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm shadow-sm ${
-              msg.role === 'user' ? 'ml-auto bg-blue-600 text-white' : 'bg-white text-neutral-900 border border-neutral-200'
+            className={`max-w-[86%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm ${
+              msg.role === 'user' ? 'ml-auto bg-[#2a2a2f] text-white' : 'bg-[#1b1b20] text-neutral-200 border border-[#2e2e36]'
             }`}
           >
             {msg.content}
@@ -212,31 +170,40 @@ export default function ChatPage() {
         ))}
       </div>
 
-      <div className="shrink-0 border-t border-neutral-200 bg-white p-2 flex gap-2">
-        <button
-          onClick={() => void toggleVoice()}
-          className={`rounded-md px-3 py-2 text-sm text-white ${listening ? 'bg-red-600' : 'bg-neutral-700'}`}
-        >
-          {listening ? '🎙 stop' : '🎤 voice'}
-        </button>
-
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') void sendMessage()
-          }}
-          placeholder="Type message or command..."
-          className="min-w-0 flex-1 rounded-md border border-neutral-300 px-3 py-2 text-sm"
-        />
-
-        <button
-          onClick={() => void sendMessage()}
-          disabled={loading}
-          className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-60"
-        >
-          {loading ? '...' : 'Send'}
-        </button>
+      <div className="shrink-0 p-3">
+        <div className="rounded-3xl border border-[#32343a] bg-[#1a1a1f] p-3">
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void sendMessage()
+            }}
+            placeholder=""
+            className="w-full bg-transparent text-neutral-200 placeholder:text-neutral-500 outline-none border-none text-[30px]"
+          />
+          <div className="mt-3 flex items-center justify-between">
+            <button className="h-11 w-11 rounded-full border border-[#383a42] flex items-center justify-center text-neutral-300">
+              <Plus size={20} />
+            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => void toggleVoice()}
+                className={`h-11 w-11 rounded-full flex items-center justify-center ${
+                  listening ? 'bg-red-600 text-white' : 'bg-transparent text-neutral-300 border border-[#383a42]'
+                }`}
+              >
+                <Mic size={20} />
+              </button>
+              <button
+                onClick={() => void sendMessage()}
+                disabled={loading}
+                className="h-11 w-11 rounded-full bg-neutral-300 text-black flex items-center justify-center disabled:opacity-60"
+              >
+                <ArrowRight size={20} />
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   )
