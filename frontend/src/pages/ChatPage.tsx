@@ -37,8 +37,8 @@ function speak(text: string) {
 function buildSandboxScript(query: string, results: Array<Record<string, any>>) {
   return [
     'from datetime import datetime',
-    "def log(line):",
-    "    print(f'[{datetime.now().strftime(\"%H:%M:%S\")}] {line}')",
+    'def log(line):',
+    '    print(f"[{datetime.now().strftime(\"%H:%M:%S\")}] {line}")',
     "log('$ agent start')",
     `query = ${JSON.stringify(query)}`,
     `results = ${JSON.stringify(results)}`,
@@ -91,17 +91,14 @@ export default function ChatPage() {
   const autoToolsIfNeeded = async (text: string) => {
     if (!ACTION_INTENT_RE.test(text)) return null
 
-    // Mandatory auto switch to terminal for agent actions.
     setActiveTab('terminal')
     appendTerminalLine({ stream: 'system', text: '$ agent detect-action-intent' })
 
-    // Mandatory web_search before sandbox operations.
     appendTerminalLine({ stream: 'system', text: '$ web_search' })
     const searchResp = await onlineAPI.search(text, 5)
     const results = Array.isArray(searchResp?.results) ? searchResp.results : []
     appendTerminalLine({ stream: 'system', text: `web_search results=${results.length}` })
 
-    // Sandbox operation with terminal-like output.
     const script = buildSandboxScript(text, results)
     const sandboxResp = await runSandboxLive(script)
 
@@ -142,8 +139,6 @@ export default function ChatPage() {
 
       const response = await chatAPI.send(payloadMessages, true)
       const assistantText = response?.response || 'No response'
-
-      // Exactly one final chat card with result summary.
       appendDialogMessage(activeDialog.id, { role: 'assistant', content: assistantText })
       speak(assistantText)
     } catch (error: any) {
@@ -200,12 +195,16 @@ export default function ChatPage() {
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-white">
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+      <div className="shrink-0 border-b border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-600">
+        Chat workspace · autonomous mode · model: {selectedModel}
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-neutral-100/70">
         {messages.map((msg) => (
           <div
             key={msg.id}
-            className={`max-w-[85%] whitespace-pre-wrap rounded-xl px-3 py-2 text-sm ${
-              msg.role === 'user' ? 'ml-auto bg-blue-600 text-white' : 'bg-neutral-100 text-neutral-900'
+            className={`max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm shadow-sm ${
+              msg.role === 'user' ? 'ml-auto bg-blue-600 text-white' : 'bg-white text-neutral-900 border border-neutral-200'
             }`}
           >
             {msg.content}
@@ -213,7 +212,7 @@ export default function ChatPage() {
         ))}
       </div>
 
-      <div className="shrink-0 border-t border-neutral-200 p-2 flex gap-2">
+      <div className="shrink-0 border-t border-neutral-200 bg-white p-2 flex gap-2">
         <button
           onClick={() => void toggleVoice()}
           className={`rounded-md px-3 py-2 text-sm text-white ${listening ? 'bg-red-600' : 'bg-neutral-700'}`}
