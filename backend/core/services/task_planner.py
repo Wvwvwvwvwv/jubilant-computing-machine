@@ -1,4 +1,5 @@
 import json
+import os
 import re
 from dataclasses import dataclass
 
@@ -53,6 +54,50 @@ class TaskPlanner:
                 return goal[len(prefix):].strip()
         return goal.strip()
 
+    def _is_termux_android(self) -> bool:
+        prefix = os.environ.get("PREFIX", "")
+        android_root = os.environ.get("ANDROID_ROOT", "")
+        return "com.termux" in prefix or bool(android_root)
+
+    def _extract_requested_python_version(self, goal: str) -> str:
+        normalized = (goal or "").replace(",", ".")
+        match = re.search(r"python\s*(3(?:\.\d+)?)", normalized, flags=re.IGNORECASE)
+        return match.group(1) if match else "3"
+
+    def _safe_termux_install_plan(self, goal: str) -> TaskExecutionPlan | None:
+        raw_goal = (goal or "").strip()
+        lowered = raw_goal.lower()
+        if not self._is_termux_android():
+            return None
+        install_markers = ("установ", "скачай", "install", "download")
+        if "python" not in lowered or not any(marker in lowered for marker in install_markers):
+            return None
+
+        requested_version = self._extract_requested_python_version(raw_goal)
+        should_probe_python_org = "python.org" in lowered or "downloads" in lowered
+        lines = [
+            "set -e",
+            f"echo 'Requested Python version: {requested_version}'",
+        ]
+        if should_probe_python_org:
+            lines.append("curl -fsSL https://www.python.org/downloads/ >/dev/null")
+        lines.extend([
+            "if ! command -v pkg >/dev/null 2>&1; then",
+            "  echo 'Refusing heavy Python source build in sandbox; Termux pkg is unavailable.' >&2",
+            "  exit 43",
+            "fi",
+            "pkg update -y",
+            "pkg install -y python",
+            "INSTALLED=$(python --version 2>&1 || true)",
+            'echo "Installed: $INSTALLED"',
+            f"if ! printf '%s' \"$INSTALLED\" | grep -F 'Python {requested_version}' >/dev/null; then",
+            f"  echo 'Exact Python {requested_version} is not available via Termux pkg in this environment.' >&2",
+            "  exit 42",
+            "fi",
+        ])
+        code = "\n".join(lines) + "\n"
+        return TaskExecutionPlan(tool="sandbox.execute", language="bash", code=code, timeout=120)
+
     def _heuristic_plan(self, goal: str) -> TaskExecutionPlan:
         raw_goal = (goal or "").strip()
         language = self._infer_language(raw_goal)
@@ -77,6 +122,10 @@ class TaskPlanner:
         raw_goal = (goal or "").strip()
         if not raw_goal:
             return self._heuristic_plan(goal)
+
+        safe_termux_plan = self._safe_termux_install_plan(raw_goal)
+        if safe_termux_plan is not None:
+            return safe_termux_plan
 
         prompt = (
             "You are a task planner for a sandbox executor. "

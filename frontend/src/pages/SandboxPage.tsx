@@ -1,85 +1,53 @@
-import { useState } from 'react'
-import { Play, Trash2 } from 'lucide-react'
-import { sandboxAPI } from '../api/client'
+import { useEffect, useState } from 'react'
+import { Trash2 } from 'lucide-react'
+import { loadTerminalState, resetTerminalState, subscribeTerminalState, type TerminalState } from '../terminalStore'
+
+function streamColor(stream?: 'stdout' | 'stderr' | 'status') {
+  if (stream === 'stderr') return '#fca5a5'
+  if (stream === 'status') return '#93c5fd'
+  return '#e5e7eb'
+}
 
 export default function SandboxPage() {
-  const [code, setCode] = useState('print("Hello from Roampal!")')
-  const [language, setLanguage] = useState('python')
-  const [output, setOutput] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [terminalState, setTerminalState] = useState<TerminalState>(loadTerminalState)
 
-  const runCode = async () => {
-    setLoading(true)
-    setOutput('')
-
-    try {
-      const result = await sandboxAPI.execute(code, language)
-      
-      let outputText = ''
-      if (result.stdout) outputText += result.stdout
-      if (result.stderr) outputText += '\n' + result.stderr
-      if (result.exit_code !== 0) outputText += `\n\nExit code: ${result.exit_code}`
-      
-      outputText += `\n\nВремя выполнения: ${result.execution_time.toFixed(2)}s`
-      
-      setOutput(outputText || 'Нет вывода')
-    } catch (error: any) {
-      setOutput(`❌ Ошибка: ${error.message}`)
-    } finally {
-      setLoading(false)
-    }
-  }
+  useEffect(() => {
+    setTerminalState(loadTerminalState())
+    return subscribeTerminalState((state) => setTerminalState(state))
+  }, [])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '1rem', gap: '1rem' }}>
-      {/* Controls */}
-      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-        <select
-          value={language}
-          onChange={(e) => setLanguage(e.target.value)}
-          style={{
-            background: '#1a1a1a',
-            border: '1px solid #333',
-            borderRadius: '0.5rem',
-            padding: '0.5rem',
-            color: '#fff'
-          }}
-        >
-          <option value="python">Python</option>
-          <option value="javascript">JavaScript</option>
-          <option value="bash">Bash</option>
-        </select>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '1rem', gap: '0.9rem', background: '#0b0b0c' }}>
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '1rem',
+        background: '#121417',
+        border: '1px solid #22262d',
+        borderRadius: '1rem',
+        padding: '0.9rem 1rem'
+      }}>
+        <div>
+          <div style={{ fontSize: '1rem', fontWeight: 600, color: '#f3f4f6' }}>Терминал</div>
+          <div style={{ fontSize: '0.82rem', color: '#8b93a1', marginTop: '0.25rem' }}>
+            {terminalState.title}
+          </div>
+        </div>
 
         <button
-          onClick={runCode}
-          disabled={loading}
+          onClick={() => resetTerminalState()}
           style={{
-            background: '#10b981',
-            border: 'none',
-            borderRadius: '0.5rem',
-            padding: '0.5rem 1rem',
-            cursor: loading ? 'not-allowed' : 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            opacity: loading ? 0.5 : 1
-          }}
-        >
-          <Play size={16} />
-          {loading ? 'Выполняется...' : 'Запустить'}
-        </button>
-
-        <button
-          onClick={() => { setCode(''); setOutput('') }}
-          style={{
-            background: '#ef4444',
-            border: 'none',
-            borderRadius: '0.5rem',
-            padding: '0.5rem 1rem',
+            background: '#7f1d1d',
+            border: '1px solid #991b1b',
+            borderRadius: '0.8rem',
+            padding: '0.7rem 1rem',
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
-            gap: '0.5rem'
+            gap: '0.5rem',
+            color: '#fff',
+            fontWeight: 600
           }}
         >
           <Trash2 size={16} />
@@ -87,51 +55,46 @@ export default function SandboxPage() {
         </button>
       </div>
 
-      {/* Code Editor */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: '0.875rem', color: '#888', marginBottom: '0.5rem' }}>
-            Код:
-          </div>
-          <textarea
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            style={{
-              width: '100%',
-              height: '100%',
-              background: '#1a1a1a',
-              border: '1px solid #333',
-              borderRadius: '0.5rem',
-              padding: '1rem',
-              color: '#fff',
-              fontFamily: 'monospace',
-              fontSize: '0.875rem',
-              resize: 'none'
-            }}
-          />
+      <div style={{
+        flex: 1,
+        background: '#050608',
+        border: '1px solid #20232a',
+        borderRadius: '1rem',
+        padding: '1rem',
+        overflow: 'auto',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.02)'
+      }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          marginBottom: '1rem',
+          color: '#8b93a1',
+          fontSize: '0.8rem'
+        }}>
+          <span style={{ width: '0.6rem', height: '0.6rem', borderRadius: '999px', background: '#ef4444' }} />
+          <span style={{ width: '0.6rem', height: '0.6rem', borderRadius: '999px', background: '#f59e0b' }} />
+          <span style={{ width: '0.6rem', height: '0.6rem', borderRadius: '999px', background: '#10b981' }} />
+          <span style={{ marginLeft: '0.5rem' }}>
+            {terminalState.active ? 'Сессия выполняется…' : 'Ожидание команды'}
+          </span>
         </div>
 
-        {/* Output */}
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: '0.875rem', color: '#888', marginBottom: '0.5rem' }}>
-            Вывод:
-          </div>
-          <pre style={{
-            width: '100%',
-            height: '100%',
-            background: '#0a0a0a',
-            border: '1px solid #333',
-            borderRadius: '0.5rem',
-            padding: '1rem',
-            color: '#fff',
-            fontFamily: 'monospace',
-            fontSize: '0.875rem',
-            overflow: 'auto',
-            margin: 0
-          }}>
-            {output || 'Вывод появится здесь...'}
-          </pre>
-        </div>
+        <pre style={{
+          margin: 0,
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+          fontSize: '0.88rem',
+          lineHeight: 1.65,
+        }}>
+          {terminalState.entries.map((entry) => (
+            <div key={entry.id} style={{ color: streamColor(entry.stream), marginBottom: '0.55rem' }}>
+              <span style={{ color: '#4b5563' }}>[{new Date(entry.timestamp).toLocaleTimeString()}]</span>{' '}
+              {entry.text}
+            </div>
+          ))}
+        </pre>
       </div>
     </div>
   )

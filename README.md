@@ -115,6 +115,15 @@ curl -sS -X POST http://127.0.0.1:8000/api/online/download \
 Для чата интернет-контекст можно подтягивать префиксами `web:` или `search:`
 (например: `web: свежие новости по llama.cpp`).
 
+Проверить прямой доступ в интернет, получение информации и скачивание можно так:
+```bash
+cd ~/roampal-android
+bash termux/check-online-tools.sh
+
+# строгий режим: падать, если нет внешнего доступа или online API выключен
+STRICT=1 bash termux/check-online-tools.sh
+```
+
 ### Проверка, что модель не выходит в интернет
 ```bash
 cd ~/roampal-android

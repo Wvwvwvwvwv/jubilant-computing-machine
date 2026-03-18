@@ -6,10 +6,19 @@ const api = axios.create({
 })
 
 export const chatAPI = {
-  send: async (messages: any[], useMemory: boolean = true) => {
+  send: async (
+    messages: any[],
+    useMemory: boolean = true,
+    options: {
+      autonomousMode?: 'off' | 'auto' | 'force'
+      webSearch?: boolean
+    } = {}
+  ) => {
     const { data } = await api.post('/chat/', {
       messages,
-      use_memory: useMemory
+      use_memory: useMemory,
+      autonomous_mode: options.autonomousMode ?? 'auto',
+      web_search: options.webSearch ?? true
     })
     return data
   },
@@ -138,6 +147,18 @@ export const companionAPI = {
   }
 }
 
+
+export const onlineAPI = {
+  search: async (query: string, limit: number = 3) => {
+    const { data } = await api.post('/online/search', { query, limit })
+    return data
+  },
+
+  download: async (url: string, filename?: string) => {
+    const { data } = await api.post('/online/download', { url, filename })
+    return data
+  }
+}
 
 export const voiceAPI = {
   startSession: async (mode: 'ptt' | 'duplex' = 'ptt', voiceGender: 'male' | 'female' = 'female') => {

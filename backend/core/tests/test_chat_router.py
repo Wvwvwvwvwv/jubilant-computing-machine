@@ -10,7 +10,9 @@ from backend.core.routers.chat import (
     build_relationship_memory_message,
     _insertion_index_before_last_user,
     _online_search_triggered,
+    _needs_source_summary_disambiguation,
     build_online_context,
+    build_source_summary_disambiguation_message,
     serialize_messages,
     trim_chat_history,
 )
@@ -208,6 +210,19 @@ def test_online_search_triggered_prefixes():
     assert _online_search_triggered("привет") is False
 
 
+def test_source_summary_disambiguation_matches_web_summary_requests():
+    assert _needs_source_summary_disambiguation("Зайди на сайт termux и сделай резуме") is True
+    assert _needs_source_summary_disambiguation("Сделай summary README из https://github.com/termux/termux-app") is True
+    assert _needs_source_summary_disambiguation("Напиши резюме для backend-разработчика") is False
+
+
+def test_source_summary_disambiguation_message_mentions_summary_not_cv():
+    msg = build_source_summary_disambiguation_message()
+    assert msg.role == "system"
+    assert "CV/резюме человека" in msg.content
+    assert "краткий обзор" in msg.content
+
+
 def test_build_online_context_disabled(monkeypatch):
     monkeypatch.setenv("ENABLE_ONLINE_TOOLS", "0")
 
@@ -235,6 +250,110 @@ def test_build_online_context_enabled(monkeypatch):
     assert "Result" in result
     assert "https://example.com" in result
 
+
+
+
+def test_build_online_context_explicit_flag_uses_raw_query(monkeypatch):
+    monkeypatch.setenv("ENABLE_ONLINE_TOOLS", "1")
+
+    async def fake_web_search(query: str, limit: int = 3):
+        assert query == "latest ai news"
+        return [{"title": "Result", "snippet": "Now", "url": "https://example.com"}]
+
+    monkeypatch.setattr(chat_router, "web_search", fake_web_search)
+
+    import asyncio
+    result = asyncio.run(build_online_context("latest ai news", enabled=True))
+    assert "Result" in result
+    assert "https://example.com" in result
+
+
+
+def test_chat_injects_source_summary_disambiguation_for_web_requests(monkeypatch):
+    app = FastAPI()
+    app.include_router(chat_router.router, prefix="/api/chat")
+    app.state.memory_engine = FakeMemoryEngine()
+    app.state.companion_state = CompanionState()
+    app.state.companion_memory = FakeCompanionMemory()
+
+    captured = {}
+
+    async def fake_generate(messages, max_tokens=512, temperature=0.7):
+        captured["messages"] = messages
+        return "Это обзор сайта Termux."
+
+    async def fake_web_search(query: str, limit: int = 3):
+        return [{"title": "Termux", "snippet": "Android terminal emulator", "url": "https://termux.dev"}]
+
+    monkeypatch.setattr(chat_router.kobold, "generate", fake_generate)
+    monkeypatch.setattr(chat_router, "web_search", fake_web_search)
+    monkeypatch.setenv("ENABLE_ONLINE_TOOLS", "1")
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/chat/",
+        json={
+            "messages": [{"role": "user", "content": "Зайди на сайт termux и сделай резуме"}],
+            "use_memory": False,
+            "web_search": True,
+        },
+    )
+
+    assert response.status_code == 200
+    system_messages = [msg for msg in captured["messages"] if msg["role"] == "system"]
+    assert any("краткий обзор содержимого источника" in msg["content"] for msg in system_messages)
+    assert any("Актуальный интернет-контекст" in msg["content"] for msg in system_messages)
+
+
+def test_chat_autonomy_returns_factual_response_without_llm_summary(monkeypatch):
+    app = FastAPI()
+    app.include_router(chat_router.router, prefix="/api/chat")
+    app.state.memory_engine = FakeMemoryEngine()
+    app.state.companion_state = CompanionState()
+    app.state.companion_memory = FakeCompanionMemory()
+    app.state.task_runner = TaskRunner()
+
+    async def fail_generate(*_args, **_kwargs):
+        raise AssertionError("LLM summary should be skipped after autonomous execution")
+
+    async def fake_execute(request):
+        class Result:
+            exit_code = 42
+            stdout = "Installed: Python 3.12.9"
+            stderr = "Exact Python 3.13 is not available via Termux pkg in this environment."
+
+        return Result()
+
+    async def fake_plan(goal: str):
+        class Plan:
+            tool = "sandbox.execute"
+            language = "bash"
+            code = "pkg install -y python"
+            timeout = 120
+
+        return Plan()
+
+    monkeypatch.setattr(chat_router.kobold, "generate", fail_generate)
+    monkeypatch.setattr(chat_router, "execute_code", fake_execute)
+    monkeypatch.setattr(chat_router.task_planner, "build_plan", fake_plan)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/chat/",
+        json={
+            "messages": [{"role": "user", "content": "Установи python 3.13"}],
+            "use_memory": False,
+            "autonomous_mode": "force",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["autonomous"]["triggered"] is True
+    assert body["autonomous"]["exit_code"] == 42
+    assert "Автозапуск по запросу завершён" in body["response"]
+    assert "stderr:" in body["response"]
+    assert "Termux pkg" in body["response"]
 
 def test_chat_autonomy_auto_mode_executes_actionable_query(monkeypatch):
     app = FastAPI()

@@ -134,10 +134,13 @@ curl http://localhost:5173               # Frontend
 # Проверьте наличие модели
 ls ~/roampal-android/models/*.gguf
 
-# Запустите вручную
-cd ~/koboldcpp
-python koboldcpp.py --model ~/roampal-android/models/YOUR_MODEL.gguf
+# Безопасный профиль запуска для Termux (меньше context, без mlock)
+cd ~/roampal-android
+KOBOLD_CONTEXTSIZE=4096 KOBOLD_THREADS=6 KOBOLD_BLASTHREADS=4 KOBOLD_USE_MLOCK=0 bash termux/start-kobold.sh
 ```
+
+Если в логе есть `failed to mlock ... Out of memory`, проблема обычно в слишком агрессивном профиле запуска.
+Для 7B/8B GGUF на Termux сначала держите `KOBOLD_USE_MLOCK=0` и уменьшайте `KOBOLD_CONTEXTSIZE`, а уже потом поднимайте параметры обратно.
 
 ### Backend ошибки
 

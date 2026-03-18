@@ -30,6 +30,7 @@ class ChatRequest(BaseModel):
     max_tokens: int = 512
     temperature: float = 0.7
     autonomous_mode: str = "auto"  # off | auto | force
+    web_search: bool = False
 
 
 class AutonomousExecution(BaseModel):
@@ -175,11 +176,32 @@ def _online_search_triggered(text: str) -> bool:
     return lowered.startswith("web:") or lowered.startswith("search:")
 
 
-async def build_online_context(query_text: str) -> str:
-    if not online_tools_enabled() or not _online_search_triggered(query_text):
+def _needs_source_summary_disambiguation(query_text: str) -> bool:
+    lowered = (query_text or "").strip().lower()
+    summary_markers = ["резюме", "резуме", "summary", "summar", "обзор"]
+    source_markers = ["github.com", "http://", "https://", "сайт", "страниц", "странице", "termux", "readme"]
+    return any(marker in lowered for marker in summary_markers) and any(marker in lowered for marker in source_markers)
+
+
+def build_source_summary_disambiguation_message() -> ChatMessage:
+    return ChatMessage(
+        role="system",
+        content=(
+            "Если пользователь просит резюме/резуме источника, сайта, README или страницы, "
+            "интерпретируй это как краткий обзор содержимого источника. "
+            "Не превращай запрос в CV/резюме человека и не выдумывай кандидата, опыт работы, контакты или LinkedIn."
+        ),
+    )
+
+
+async def build_online_context(query_text: str, enabled: bool = False) -> str:
+    if not online_tools_enabled():
         return ""
 
-    cleaned = query_text.split(":", 1)[1].strip() if ":" in query_text else query_text
+    if not enabled and not _online_search_triggered(query_text):
+        return ""
+
+    cleaned = query_text.split(":", 1)[1].strip() if _online_search_triggered(query_text) and ":" in query_text else query_text.strip()
     if not cleaned:
         return ""
 
@@ -217,6 +239,30 @@ def _looks_like_actionable_task(query_text: str) -> bool:
         "pip install", "pkg install", "apt install", "python3", "python 3",
     ]
     return any(m in lowered for m in markers)
+
+
+def build_autonomous_response(query_text: str, autonomous: AutonomousExecution) -> str:
+    lines = [
+        f"Автозапуск по запросу завершён: {query_text.strip()}",
+        f"task_id: {autonomous.task_id or 'n/a'}",
+        f"status: {autonomous.status or 'unknown'}",
+        f"language: {autonomous.language or 'n/a'}",
+        f"exit_code: {autonomous.exit_code if autonomous.exit_code is not None else 'n/a'}",
+    ]
+
+    if autonomous.exit_code == 0:
+        lines.append("Результат: команда выполнена успешно.")
+    else:
+        lines.append("Результат: выполнение завершилось ошибкой; смотри stderr ниже.")
+
+    if autonomous.stdout:
+        lines.append("stdout:")
+        lines.append(autonomous.stdout[:4000])
+    if autonomous.stderr:
+        lines.append("stderr:")
+        lines.append(autonomous.stderr[:4000])
+
+    return "\n".join(lines)
 
 
 def _should_run_autonomy(mode: str, query_text: str) -> bool:
@@ -331,8 +377,12 @@ async def chat(request: ChatRequest, req: Request):
                 working_messages.insert(insertion_index, system_msg)
                 context_items = len(filtered_context_items)
 
+    if request.web_search and _needs_source_summary_disambiguation(query_text):
+        insertion_index = _insertion_index_before_last_user(working_messages)
+        working_messages.insert(insertion_index, build_source_summary_disambiguation_message())
+
     # Optional internet search context in chat (prefix `web:` or `search:`).
-    online_context = await build_online_context(query_text)
+    online_context = await build_online_context(query_text, enabled=request.web_search)
     if online_context:
         insertion_index = _insertion_index_before_last_user(working_messages)
         working_messages.insert(
@@ -363,15 +413,16 @@ async def chat(request: ChatRequest, req: Request):
 
     working_messages = trim_chat_history(working_messages)
 
-    # Отправка в KoboldCpp
     try:
-        response = await active_kobold.generate(
-            messages=serialize_messages(working_messages),
-            max_tokens=request.max_tokens,
-            temperature=request.temperature,
-        )
+        if autonomous_info is not None and autonomous_info.triggered:
+            response = build_autonomous_response(query_text, autonomous_info)
+        else:
+            response = await active_kobold.generate(
+                messages=serialize_messages(working_messages),
+                max_tokens=request.max_tokens,
+                temperature=request.temperature,
+            )
 
-        # Сохранение в память для будущего обучения
         if request.use_memory:
             await memory_engine.add_interaction(
                 query=query_text,
@@ -379,7 +430,6 @@ async def chat(request: ChatRequest, req: Request):
                 context_used=memory_context,
             )
 
-        # Запись explainability trace в companion state
         if companion_state is not None:
             sess = companion_state.get_session()
             companion_state.set_last_trace(
