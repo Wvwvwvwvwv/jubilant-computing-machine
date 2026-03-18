@@ -1,98 +1,62 @@
 import { Outlet, NavLink } from 'react-router-dom'
-import { MessageSquare, Brain, Terminal, ListChecks } from 'lucide-react'
+import { MessageSquare, Brain, Terminal } from 'lucide-react'
+
+const navLinkStyle = ({ isActive }: { isActive: boolean }) => ({
+  flex: 1,
+  display: 'flex',
+  flexDirection: 'column' as const,
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: '0.25rem',
+  padding: '0.8rem 0.5rem',
+  color: isActive ? '#60a5fa' : '#8b8f98',
+  textDecoration: 'none',
+  fontSize: '0.875rem',
+  fontWeight: 500,
+  borderRadius: '0.9rem',
+  background: isActive ? 'rgba(59, 130, 246, 0.12)' : 'transparent',
+  border: isActive ? '1px solid rgba(96, 165, 250, 0.24)' : '1px solid transparent',
+})
 
 export default function Layout() {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-      {/* Header */}
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#0b0b0c' }}>
       <header style={{
-        background: '#111',
-        borderBottom: '1px solid #222',
-        padding: '1rem'
+        background: 'linear-gradient(180deg, #111214 0%, #0d0e10 100%)',
+        borderBottom: '1px solid #20232a',
+        padding: '1rem 1.25rem',
+        boxShadow: '0 10px 30px rgba(0, 0, 0, 0.22)'
       }}>
-        <h1 style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>
+        <h1 style={{ fontSize: '1.35rem', fontWeight: 700, letterSpacing: '-0.02em' }}>
           🤖 Roampal Android
         </h1>
       </header>
 
-      {/* Main Content */}
       <div style={{ flex: 1, overflow: 'hidden' }}>
         <Outlet />
       </div>
 
-      {/* Bottom Navigation */}
       <nav style={{
         display: 'flex',
-        background: '#111',
-        borderTop: '1px solid #222',
-        padding: '0.5rem'
+        gap: '0.6rem',
+        background: '#101113',
+        borderTop: '1px solid #20232a',
+        padding: '0.7rem',
+        boxShadow: '0 -10px 30px rgba(0, 0, 0, 0.18)'
       }}>
-        <NavLink
-          to="/chat"
-          style={({ isActive }) => ({
-            flex: 1,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            padding: '0.75rem',
-            color: isActive ? '#3b82f6' : '#888',
-            textDecoration: 'none',
-            fontSize: '0.875rem'
-          })}
-        >
-          <MessageSquare size={24} />
-          <span style={{ marginTop: '0.25rem' }}>Чат</span>
+        <NavLink to="/chat" style={navLinkStyle}>
+          <MessageSquare size={22} />
+          <span>Чат</span>
         </NavLink>
 
-        <NavLink
-          to="/memory"
-          style={({ isActive }) => ({
-            flex: 1,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            padding: '0.75rem',
-            color: isActive ? '#3b82f6' : '#888',
-            textDecoration: 'none',
-            fontSize: '0.875rem'
-          })}
-        >
-          <Brain size={24} />
-          <span style={{ marginTop: '0.25rem' }}>Память</span>
+        <NavLink to="/memory" style={navLinkStyle}>
+          <Brain size={22} />
+          <span>Память</span>
         </NavLink>
 
-        <NavLink
-          to="/sandbox"
-          style={({ isActive }) => ({
-            flex: 1,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            padding: '0.75rem',
-            color: isActive ? '#3b82f6' : '#888',
-            textDecoration: 'none',
-            fontSize: '0.875rem'
-          })}
-        >
-          <Terminal size={24} />
-          <span style={{ marginTop: '0.25rem' }}>Sandbox</span>
-        </NavLink>
-
-        <NavLink
-          to="/tasks"
-          style={({ isActive }) => ({
-            flex: 1,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            padding: '0.75rem',
-            color: isActive ? '#3b82f6' : '#888',
-            textDecoration: 'none',
-            fontSize: '0.875rem'
-          })}
-        >
-          <ListChecks size={24} />
-          <span style={{ marginTop: '0.25rem' }}>Задачи</span>
+        <NavLink to="/terminal" style={navLinkStyle}>
+          <Terminal size={22} />
+          <span>Терминал</span>
         </NavLink>
       </nav>
     </div>

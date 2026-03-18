@@ -30,6 +30,7 @@ class ChatRequest(BaseModel):
     max_tokens: int = 512
     temperature: float = 0.7
     autonomous_mode: str = "auto"  # off | auto | force
+    web_search: bool = False
 
 
 class AutonomousExecution(BaseModel):
@@ -175,11 +176,14 @@ def _online_search_triggered(text: str) -> bool:
     return lowered.startswith("web:") or lowered.startswith("search:")
 
 
-async def build_online_context(query_text: str) -> str:
-    if not online_tools_enabled() or not _online_search_triggered(query_text):
+async def build_online_context(query_text: str, enabled: bool = False) -> str:
+    if not online_tools_enabled():
         return ""
 
-    cleaned = query_text.split(":", 1)[1].strip() if ":" in query_text else query_text
+    if not enabled and not _online_search_triggered(query_text):
+        return ""
+
+    cleaned = query_text.split(":", 1)[1].strip() if _online_search_triggered(query_text) and ":" in query_text else query_text.strip()
     if not cleaned:
         return ""
 
@@ -332,7 +336,7 @@ async def chat(request: ChatRequest, req: Request):
                 context_items = len(filtered_context_items)
 
     # Optional internet search context in chat (prefix `web:` or `search:`).
-    online_context = await build_online_context(query_text)
+    online_context = await build_online_context(query_text, enabled=request.web_search)
     if online_context:
         insertion_index = _insertion_index_before_last_user(working_messages)
         working_messages.insert(

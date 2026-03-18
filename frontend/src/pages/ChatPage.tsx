@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Send, ThumbsUp, ThumbsDown, Mic, Square } from 'lucide-react'
 import { chatAPI } from '../api/client'
+import { appendTerminalEntry, createTerminalSession, finishTerminalSession } from '../terminalStore'
 
 interface Message {
   role: 'user' | 'assistant'
@@ -18,7 +20,6 @@ const CHAT_MESSAGES_KEY = 'chat_messages'
 const CHAT_USE_MEMORY_KEY = 'chat_use_memory'
 const CHAT_INPUT_KEY = 'chat_input'
 
-// In-memory fallback: survives route unmount/mount even if storage is unavailable.
 let chatDraftState: ChatDraftState | null = null
 
 function loadMessages(): Message[] {
@@ -73,6 +74,7 @@ function persistState(messages: Message[], useMemory: boolean, input: string) {
 }
 
 export default function ChatPage() {
+  const navigate = useNavigate()
   const [messages, setMessages] = useState<Message[]>(loadMessages)
   const [input, setInput] = useState(loadInput)
   const [loading, setLoading] = useState(false)
@@ -182,16 +184,46 @@ export default function ChatPage() {
   const sendMessage = async () => {
     if (!input.trim() || loading) return
 
-    const userMessage: Message = { role: 'user', content: input }
+    const prompt = input.trim()
+    const userMessage: Message = { role: 'user', content: prompt }
     const nextMessages = [...messagesRef.current, userMessage]
 
     updateMessages(nextMessages)
     updateInput('')
     setLoading(true)
 
-    try {
-      const response = await chatAPI.send(nextMessages, useMemoryRef.current)
+    createTerminalSession(`Автозапуск для: ${prompt}`, [
+      { text: '$ roampal chat --web-search on --sandbox auto', stream: 'status' },
+      { text: `> ${prompt}`, stream: 'stdout' },
+      { text: 'Подготовка запроса без ручного подтверждения…', stream: 'status' },
+      { text: 'Web search: enabled', stream: 'status' },
+      { text: 'Sandbox: enabled', stream: 'status' },
+      { text: 'Terminal attached to current chat run.', stream: 'status' },
+    ])
+    navigate('/terminal')
 
+    try {
+      appendTerminalEntry('Запрос отправлен в /api/chat/…', 'status')
+      const response = await chatAPI.send(nextMessages, useMemoryRef.current, {
+        autonomousMode: 'force',
+        webSearch: true
+      })
+
+      if (response.autonomous?.triggered) {
+        appendTerminalEntry(`task_id=${response.autonomous.task_id || 'n/a'}`, 'status')
+        appendTerminalEntry(`language=${response.autonomous.language || 'n/a'} exit_code=${String(response.autonomous.exit_code ?? 'n/a')}`, 'status')
+        if (response.autonomous.stdout) {
+          appendTerminalEntry(response.autonomous.stdout, 'stdout')
+        }
+        if (response.autonomous.stderr) {
+          appendTerminalEntry(response.autonomous.stderr, 'stderr')
+        }
+        appendTerminalEntry(`status=${response.autonomous.status || 'unknown'}`, response.autonomous.exit_code === 0 ? 'status' : 'stderr')
+      } else {
+        appendTerminalEntry('Автономное sandbox-выполнение не вернуло отдельный trace; получен только финальный ответ.', 'status')
+      }
+
+      finishTerminalSession('Сессия завершена.')
       updateMessages(prev => [...prev, {
         role: 'assistant',
         content: response.response,
@@ -200,9 +232,12 @@ export default function ChatPage() {
     } catch (error: any) {
       console.error('Chat error:', error)
       const detail = error?.response?.data?.detail
+      const message = detail ? `❌ ${detail}` : '❌ Ошибка соединения с сервером'
+      appendTerminalEntry(message, 'stderr')
+      finishTerminalSession('Сессия завершена с ошибкой.')
       updateMessages(prev => [...prev, {
         role: 'assistant',
-        content: detail ? `❌ ${detail}` : '❌ Ошибка соединения с сервером'
+        content: message
       }])
     } finally {
       setLoading(false)
@@ -218,8 +253,18 @@ export default function ChatPage() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Messages */}
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#0b0b0c' }}>
+      <div style={{
+        padding: '1rem 1rem 0.5rem',
+        borderBottom: '1px solid #1f2329',
+        background: 'linear-gradient(180deg, rgba(15,16,18,1) 0%, rgba(11,11,12,1) 100%)'
+      }}>
+        <div style={{ fontSize: '0.95rem', color: '#d8dee9', fontWeight: 600 }}>Авто-чат</div>
+        <div style={{ marginTop: '0.35rem', fontSize: '0.82rem', color: '#8b93a1' }}>
+          Web search и sandbox включаются автоматически, а live-лог уходит во вкладку «Терминал».
+        </div>
+      </div>
+
       <div style={{
         flex: 1,
         overflowY: 'auto',
@@ -233,14 +278,18 @@ export default function ChatPage() {
             key={idx}
             style={{
               alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-              maxWidth: '80%'
+              maxWidth: '85%'
             }}
           >
             <div style={{
-              background: msg.role === 'user' ? '#3b82f6' : '#1f1f1f',
-              padding: '0.75rem 1rem',
+              background: msg.role === 'user' ? 'linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%)' : '#17191d',
+              border: msg.role === 'user' ? '1px solid rgba(96, 165, 250, 0.28)' : '1px solid #23272f',
+              padding: '0.85rem 1rem',
               borderRadius: '1rem',
-              wordWrap: 'break-word'
+              color: '#f3f4f6',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              boxShadow: '0 10px 25px rgba(0, 0, 0, 0.18)'
             }}>
               {msg.content}
             </div>
@@ -256,10 +305,10 @@ export default function ChatPage() {
                   onClick={() => handleFeedback(msg.id!, true)}
                   style={{
                     background: 'transparent',
-                    border: '1px solid #333',
-                    borderRadius: '0.5rem',
-                    padding: '0.25rem 0.5rem',
-                    color: '#888',
+                    border: '1px solid #2a3038',
+                    borderRadius: '0.6rem',
+                    padding: '0.35rem 0.6rem',
+                    color: '#8b93a1',
                     cursor: 'pointer'
                   }}
                 >
@@ -269,10 +318,10 @@ export default function ChatPage() {
                   onClick={() => handleFeedback(msg.id!, false)}
                   style={{
                     background: 'transparent',
-                    border: '1px solid #333',
-                    borderRadius: '0.5rem',
-                    padding: '0.25rem 0.5rem',
-                    color: '#888',
+                    border: '1px solid #2a3038',
+                    borderRadius: '0.6rem',
+                    padding: '0.35rem 0.6rem',
+                    color: '#8b93a1',
                     cursor: 'pointer'
                   }}
                 >
@@ -286,25 +335,27 @@ export default function ChatPage() {
         {loading && (
           <div style={{ alignSelf: 'flex-start' }}>
             <div style={{
-              background: '#1f1f1f',
+              background: '#17191d',
+              border: '1px solid #23272f',
               padding: '0.75rem 1rem',
-              borderRadius: '1rem'
+              borderRadius: '1rem',
+              color: '#d1d5db'
             }}>
-              Думаю...
+              Выполняю запрос, смотри live-лог во вкладке «Терминал»…
             </div>
           </div>
         )}
       </div>
 
-      {/* Input */}
       <div style={{
         padding: '1rem',
-        borderTop: '1px solid #222',
+        borderTop: '1px solid #1f2329',
         display: 'flex',
         gap: '0.5rem',
-        alignItems: 'center'
+        alignItems: 'center',
+        background: '#101113'
       }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', color: '#c7ced9' }}>
           <input
             type="checkbox"
             checked={useMemory}
@@ -317,55 +368,54 @@ export default function ChatPage() {
           type="text"
           value={input}
           onChange={(e) => updateInput(e.target.value)}
-          onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-          placeholder="Сообщение..."
+          onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+          placeholder="Напиши задачу — web search и sandbox включатся автоматически"
           style={{
             flex: 1,
-            background: '#1a1a1a',
-            border: '1px solid #333',
-            borderRadius: '1.5rem',
-            padding: '0.75rem 1rem',
+            background: '#17191d',
+            border: '1px solid #2a3038',
+            borderRadius: '0.9rem',
+            padding: '0.85rem 1rem',
             color: '#fff',
             outline: 'none'
           }}
         />
 
         <button
-          onClick={sendMessage}
-          disabled={loading || !input.trim()}
+          onClick={isDictating ? stopDictation : startDictation}
           style={{
-            background: '#3b82f6',
-            border: 'none',
-            borderRadius: '50%',
-            width: '3rem',
-            height: '3rem',
+            background: isDictating ? '#dc2626' : '#1f2937',
+            border: '1px solid #2a3038',
+            borderRadius: '0.9rem',
+            padding: '0.8rem',
+            cursor: 'pointer',
+            color: '#fff',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            cursor: loading ? 'not-allowed' : 'pointer',
-            opacity: loading ? 0.5 : 1
+            justifyContent: 'center'
           }}
+          title={isDictating ? 'Остановить диктовку' : 'Начать диктовку'}
         >
-          <Send size={20} />
+          {isDictating ? <Square size={18} /> : <Mic size={18} />}
         </button>
 
         <button
-          onClick={isDictating ? stopDictation : startDictation}
+          onClick={sendMessage}
+          disabled={loading || !input.trim()}
           style={{
-            background: isDictating ? '#dc2626' : '#374151',
+            background: loading || !input.trim() ? '#1e3a8a' : '#2563eb',
             border: 'none',
-            borderRadius: '50%',
-            width: '3rem',
-            height: '3rem',
+            borderRadius: '0.9rem',
+            padding: '0.85rem 1rem',
+            cursor: loading || !input.trim() ? 'not-allowed' : 'pointer',
+            color: '#fff',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            cursor: 'pointer',
-            color: '#fff'
+            opacity: loading || !input.trim() ? 0.65 : 1
           }}
-          title={isDictating ? 'Остановить диктовку' : 'Диктовка в чат'}
         >
-          {isDictating ? <Square size={18} /> : <Mic size={18} />}
+          <Send size={18} />
         </button>
       </div>
     </div>

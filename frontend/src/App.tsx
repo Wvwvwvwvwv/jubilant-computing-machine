@@ -3,7 +3,6 @@ import Layout from './components/Layout'
 import ChatPage from './pages/ChatPage'
 import MemoryPage from './pages/MemoryPage'
 import SandboxPage from './pages/SandboxPage'
-import TasksPage from './pages/TasksPage'
 
 function App() {
   return (
@@ -13,8 +12,8 @@ function App() {
           <Route index element={<Navigate to="/chat" replace />} />
           <Route path="chat" element={<ChatPage />} />
           <Route path="memory" element={<MemoryPage />} />
-          <Route path="sandbox" element={<SandboxPage />} />
-          <Route path="tasks" element={<TasksPage />} />
+          <Route path="terminal" element={<SandboxPage />} />
+          <Route path="sandbox" element={<Navigate to="/terminal" replace />} />
         </Route>
       </Routes>
     </BrowserRouter>

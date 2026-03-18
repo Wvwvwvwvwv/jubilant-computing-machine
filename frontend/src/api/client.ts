@@ -6,10 +6,19 @@ const api = axios.create({
 })
 
 export const chatAPI = {
-  send: async (messages: any[], useMemory: boolean = true) => {
+  send: async (
+    messages: any[],
+    useMemory: boolean = true,
+    options: {
+      autonomousMode?: 'off' | 'auto' | 'force'
+      webSearch?: boolean
+    } = {}
+  ) => {
     const { data } = await api.post('/chat/', {
       messages,
-      use_memory: useMemory
+      use_memory: useMemory,
+      autonomous_mode: options.autonomousMode ?? 'force',
+      web_search: options.webSearch ?? true
     })
     return data
   },

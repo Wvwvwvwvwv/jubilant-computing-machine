@@ -236,6 +236,22 @@ def test_build_online_context_enabled(monkeypatch):
     assert "https://example.com" in result
 
 
+
+
+def test_build_online_context_explicit_flag_uses_raw_query(monkeypatch):
+    monkeypatch.setenv("ENABLE_ONLINE_TOOLS", "1")
+
+    async def fake_web_search(query: str, limit: int = 3):
+        assert query == "latest ai news"
+        return [{"title": "Result", "snippet": "Now", "url": "https://example.com"}]
+
+    monkeypatch.setattr(chat_router, "web_search", fake_web_search)
+
+    import asyncio
+    result = asyncio.run(build_online_context("latest ai news", enabled=True))
+    assert "Result" in result
+    assert "https://example.com" in result
+
 def test_chat_autonomy_auto_mode_executes_actionable_query(monkeypatch):
     app = FastAPI()
     app.include_router(chat_router.router, prefix="/api/chat")
