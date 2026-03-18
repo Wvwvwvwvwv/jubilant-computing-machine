@@ -252,6 +252,58 @@ def test_build_online_context_explicit_flag_uses_raw_query(monkeypatch):
     assert "Result" in result
     assert "https://example.com" in result
 
+
+
+def test_chat_autonomy_returns_factual_response_without_llm_summary(monkeypatch):
+    app = FastAPI()
+    app.include_router(chat_router.router, prefix="/api/chat")
+    app.state.memory_engine = FakeMemoryEngine()
+    app.state.companion_state = CompanionState()
+    app.state.companion_memory = FakeCompanionMemory()
+    app.state.task_runner = TaskRunner()
+
+    async def fail_generate(*_args, **_kwargs):
+        raise AssertionError("LLM summary should be skipped after autonomous execution")
+
+    async def fake_execute(request):
+        class Result:
+            exit_code = 42
+            stdout = "Installed: Python 3.12.9"
+            stderr = "Exact Python 3.13 is not available via Termux pkg in this environment."
+
+        return Result()
+
+    async def fake_plan(goal: str):
+        class Plan:
+            tool = "sandbox.execute"
+            language = "bash"
+            code = "pkg install -y python"
+            timeout = 120
+
+        return Plan()
+
+    monkeypatch.setattr(chat_router.kobold, "generate", fail_generate)
+    monkeypatch.setattr(chat_router, "execute_code", fake_execute)
+    monkeypatch.setattr(chat_router.task_planner, "build_plan", fake_plan)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/chat/",
+        json={
+            "messages": [{"role": "user", "content": "Установи python 3.13"}],
+            "use_memory": False,
+            "autonomous_mode": "force",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["autonomous"]["triggered"] is True
+    assert body["autonomous"]["exit_code"] == 42
+    assert "Автозапуск по запросу завершён" in body["response"]
+    assert "stderr:" in body["response"]
+    assert "Termux pkg" in body["response"]
+
 def test_chat_autonomy_auto_mode_executes_actionable_query(monkeypatch):
     app = FastAPI()
     app.include_router(chat_router.router, prefix="/api/chat")

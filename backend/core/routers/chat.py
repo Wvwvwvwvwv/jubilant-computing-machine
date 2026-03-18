@@ -223,6 +223,30 @@ def _looks_like_actionable_task(query_text: str) -> bool:
     return any(m in lowered for m in markers)
 
 
+def build_autonomous_response(query_text: str, autonomous: AutonomousExecution) -> str:
+    lines = [
+        f"Автозапуск по запросу завершён: {query_text.strip()}",
+        f"task_id: {autonomous.task_id or 'n/a'}",
+        f"status: {autonomous.status or 'unknown'}",
+        f"language: {autonomous.language or 'n/a'}",
+        f"exit_code: {autonomous.exit_code if autonomous.exit_code is not None else 'n/a'}",
+    ]
+
+    if autonomous.exit_code == 0:
+        lines.append("Результат: команда выполнена успешно.")
+    else:
+        lines.append("Результат: выполнение завершилось ошибкой; смотри stderr ниже.")
+
+    if autonomous.stdout:
+        lines.append("stdout:")
+        lines.append(autonomous.stdout[:4000])
+    if autonomous.stderr:
+        lines.append("stderr:")
+        lines.append(autonomous.stderr[:4000])
+
+    return "\n".join(lines)
+
+
 def _should_run_autonomy(mode: str, query_text: str) -> bool:
     normalized = (mode or "auto").strip().lower()
     if normalized == "off":
@@ -367,15 +391,16 @@ async def chat(request: ChatRequest, req: Request):
 
     working_messages = trim_chat_history(working_messages)
 
-    # Отправка в KoboldCpp
     try:
-        response = await active_kobold.generate(
-            messages=serialize_messages(working_messages),
-            max_tokens=request.max_tokens,
-            temperature=request.temperature,
-        )
+        if autonomous_info is not None and autonomous_info.triggered:
+            response = build_autonomous_response(query_text, autonomous_info)
+        else:
+            response = await active_kobold.generate(
+                messages=serialize_messages(working_messages),
+                max_tokens=request.max_tokens,
+                temperature=request.temperature,
+            )
 
-        # Сохранение в память для будущего обучения
         if request.use_memory:
             await memory_engine.add_interaction(
                 query=query_text,
@@ -383,7 +408,6 @@ async def chat(request: ChatRequest, req: Request):
                 context_used=memory_context,
             )
 
-        # Запись explainability trace в companion state
         if companion_state is not None:
             sess = companion_state.get_session()
             companion_state.set_last_trace(

@@ -27,3 +27,20 @@ def test_task_planner_falls_back_when_llm_fails(monkeypatch):
     plan = asyncio.run(planner.build_plan("python: print(1)"))
     assert plan.language == "python"
     assert plan.code == "print(1)"
+
+
+def test_task_planner_uses_safe_termux_pkg_plan_for_python_install(monkeypatch):
+    planner = TaskPlanner()
+    monkeypatch.setenv("ANDROID_ROOT", "/system")
+
+    async def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("LLM should not be used for guarded Termux Python install flow")
+
+    monkeypatch.setattr(planner.kobold, "generate", fail_if_called)
+    plan = asyncio.run(planner.build_plan("Зайди на сайт https://www.python.org/downloads/ и скачай и установи python 3,13"))
+    assert plan.tool == "sandbox.execute"
+    assert plan.language == "bash"
+    assert "pkg install -y python" in plan.code
+    assert "python.org/downloads" in plan.code
+    assert "make altinstall" not in plan.code
+    assert plan.timeout == 120
