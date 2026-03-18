@@ -10,7 +10,9 @@ from backend.core.routers.chat import (
     build_relationship_memory_message,
     _insertion_index_before_last_user,
     _online_search_triggered,
+    _needs_source_summary_disambiguation,
     build_online_context,
+    build_source_summary_disambiguation_message,
     serialize_messages,
     trim_chat_history,
 )
@@ -208,6 +210,19 @@ def test_online_search_triggered_prefixes():
     assert _online_search_triggered("привет") is False
 
 
+def test_source_summary_disambiguation_matches_web_summary_requests():
+    assert _needs_source_summary_disambiguation("Зайди на сайт termux и сделай резуме") is True
+    assert _needs_source_summary_disambiguation("Сделай summary README из https://github.com/termux/termux-app") is True
+    assert _needs_source_summary_disambiguation("Напиши резюме для backend-разработчика") is False
+
+
+def test_source_summary_disambiguation_message_mentions_summary_not_cv():
+    msg = build_source_summary_disambiguation_message()
+    assert msg.role == "system"
+    assert "CV/резюме человека" in msg.content
+    assert "краткий обзор" in msg.content
+
+
 def test_build_online_context_disabled(monkeypatch):
     monkeypatch.setenv("ENABLE_ONLINE_TOOLS", "0")
 
@@ -252,6 +267,42 @@ def test_build_online_context_explicit_flag_uses_raw_query(monkeypatch):
     assert "Result" in result
     assert "https://example.com" in result
 
+
+
+def test_chat_injects_source_summary_disambiguation_for_web_requests(monkeypatch):
+    app = FastAPI()
+    app.include_router(chat_router.router, prefix="/api/chat")
+    app.state.memory_engine = FakeMemoryEngine()
+    app.state.companion_state = CompanionState()
+    app.state.companion_memory = FakeCompanionMemory()
+
+    captured = {}
+
+    async def fake_generate(messages, max_tokens=512, temperature=0.7):
+        captured["messages"] = messages
+        return "Это обзор сайта Termux."
+
+    async def fake_web_search(query: str, limit: int = 3):
+        return [{"title": "Termux", "snippet": "Android terminal emulator", "url": "https://termux.dev"}]
+
+    monkeypatch.setattr(chat_router.kobold, "generate", fake_generate)
+    monkeypatch.setattr(chat_router, "web_search", fake_web_search)
+    monkeypatch.setenv("ENABLE_ONLINE_TOOLS", "1")
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/chat/",
+        json={
+            "messages": [{"role": "user", "content": "Зайди на сайт termux и сделай резуме"}],
+            "use_memory": False,
+            "web_search": True,
+        },
+    )
+
+    assert response.status_code == 200
+    system_messages = [msg for msg in captured["messages"] if msg["role"] == "system"]
+    assert any("краткий обзор содержимого источника" in msg["content"] for msg in system_messages)
+    assert any("Актуальный интернет-контекст" in msg["content"] for msg in system_messages)
 
 
 def test_chat_autonomy_returns_factual_response_without_llm_summary(monkeypatch):

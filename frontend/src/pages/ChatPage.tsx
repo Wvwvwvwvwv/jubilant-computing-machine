@@ -111,12 +111,10 @@ export default function ChatPage() {
   }, [])
 
   const updateMessages = (next: Message[] | ((prev: Message[]) => Message[])) => {
-    setMessages(prev => {
-      const computed = typeof next === 'function' ? (next as (p: Message[]) => Message[])(prev) : next
-      messagesRef.current = computed
-      persistState(computed, useMemoryRef.current, inputRef.current)
-      return computed
-    })
+    const computed = typeof next === 'function' ? (next as (p: Message[]) => Message[])(messagesRef.current) : next
+    messagesRef.current = computed
+    persistState(computed, useMemoryRef.current, inputRef.current)
+    setMessages(computed)
   }
 
   const updateUseMemory = (next: boolean) => {

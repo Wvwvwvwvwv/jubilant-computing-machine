@@ -176,6 +176,24 @@ def _online_search_triggered(text: str) -> bool:
     return lowered.startswith("web:") or lowered.startswith("search:")
 
 
+def _needs_source_summary_disambiguation(query_text: str) -> bool:
+    lowered = (query_text or "").strip().lower()
+    summary_markers = ["резюме", "резуме", "summary", "summar", "обзор"]
+    source_markers = ["github.com", "http://", "https://", "сайт", "страниц", "странице", "termux", "readme"]
+    return any(marker in lowered for marker in summary_markers) and any(marker in lowered for marker in source_markers)
+
+
+def build_source_summary_disambiguation_message() -> ChatMessage:
+    return ChatMessage(
+        role="system",
+        content=(
+            "Если пользователь просит резюме/резуме источника, сайта, README или страницы, "
+            "интерпретируй это как краткий обзор содержимого источника. "
+            "Не превращай запрос в CV/резюме человека и не выдумывай кандидата, опыт работы, контакты или LinkedIn."
+        ),
+    )
+
+
 async def build_online_context(query_text: str, enabled: bool = False) -> str:
     if not online_tools_enabled():
         return ""
@@ -358,6 +376,10 @@ async def chat(request: ChatRequest, req: Request):
                 insertion_index = _insertion_index_before_last_user(working_messages)
                 working_messages.insert(insertion_index, system_msg)
                 context_items = len(filtered_context_items)
+
+    if request.web_search and _needs_source_summary_disambiguation(query_text):
+        insertion_index = _insertion_index_before_last_user(working_messages)
+        working_messages.insert(insertion_index, build_source_summary_disambiguation_message())
 
     # Optional internet search context in chat (prefix `web:` or `search:`).
     online_context = await build_online_context(query_text, enabled=request.web_search)
