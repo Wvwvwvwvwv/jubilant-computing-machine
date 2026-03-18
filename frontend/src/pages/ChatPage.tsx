@@ -1,209 +1,372 @@
-import { useMemo, useRef, useState } from 'react'
-import { Mic, ArrowRight, Plus } from 'lucide-react'
-import { chatAPI, onlineAPI, sandboxAPI, voiceAPI } from '../api/client'
-import { useAppState } from '../state/AppState'
+import { useEffect, useRef, useState } from 'react'
+import { Send, ThumbsUp, ThumbsDown, Mic, Square } from 'lucide-react'
+import { chatAPI } from '../api/client'
 
-const AGENT_SYSTEM_PROMPT = [
-  'You are Roampal autonomous local agent.',
-  'No manual confirmations and no additional planners.',
-  'Model decides when and how to use web_search + sandbox.',
-  'For any action-oriented user intent (text or voice), automatically run web_search first, then run required operations in sandbox.',
-  'During execution, provide terminal-like step-by-step progress, then return one concise final result card.'
-].join('\n')
-
-const ACTION_INTENT_RE =
-  /(найди|скачай|поищи|посмотри|уточни|установи|конвертируй|измени|запустить|запусти|проверь|разбери|проанализируй|find|search|download|inspect|install|convert|modify|run|verify|analy[sz]e|check|parse)/i
-
-type BrowserRecognition = {
-  lang: string
-  interimResults: boolean
-  maxAlternatives: number
-  continuous: boolean
-  onresult: ((event: any) => void) | null
-  onerror: ((event: any) => void) | null
-  onend: (() => void) | null
-  start: () => void
-  stop: () => void
+interface Message {
+  role: 'user' | 'assistant'
+  content: string
+  id?: string
 }
 
-function buildSandboxScript(query: string, results: Array<Record<string, any>>) {
-  return [
-    'from datetime import datetime',
-    'def log(line):',
-    '    print(f"[{datetime.now().strftime(\"%H:%M:%S\")}] {line}")',
-    "log('$ agent start')",
-    `query = ${JSON.stringify(query)}`,
-    `results = ${JSON.stringify(results)}`,
-    "log(f'query: {query}')",
-    "log(f'search_results: {len(results)}')",
-    "for idx, item in enumerate(results, 1):",
-    "    title = item.get('title', 'Result')",
-    "    url = item.get('url', '')",
-    "    log(f'[{idx}] {title} -> {url}')",
-    "log('$ sandbox analyze')",
-    "log('$ done')"
-  ].join('\n')
+interface ChatDraftState {
+  messages: Message[]
+  useMemory: boolean
+  input: string
+}
+
+const CHAT_MESSAGES_KEY = 'chat_messages'
+const CHAT_USE_MEMORY_KEY = 'chat_use_memory'
+const CHAT_INPUT_KEY = 'chat_input'
+
+// In-memory fallback: survives route unmount/mount even if storage is unavailable.
+let chatDraftState: ChatDraftState | null = null
+
+function loadMessages(): Message[] {
+  if (chatDraftState) {
+    return chatDraftState.messages
+  }
+
+  try {
+    const saved = localStorage.getItem(CHAT_MESSAGES_KEY)
+    const parsed = saved ? JSON.parse(saved) : []
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function loadUseMemory(): boolean {
+  if (chatDraftState) {
+    return chatDraftState.useMemory
+  }
+
+  try {
+    const saved = localStorage.getItem(CHAT_USE_MEMORY_KEY)
+    return saved ? Boolean(JSON.parse(saved)) : true
+  } catch {
+    return true
+  }
+}
+
+function loadInput(): string {
+  if (chatDraftState) {
+    return chatDraftState.input
+  }
+
+  try {
+    return localStorage.getItem(CHAT_INPUT_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+function persistState(messages: Message[], useMemory: boolean, input: string) {
+  chatDraftState = { messages, useMemory, input }
+
+  try {
+    localStorage.setItem(CHAT_MESSAGES_KEY, JSON.stringify(messages))
+    localStorage.setItem(CHAT_USE_MEMORY_KEY, JSON.stringify(useMemory))
+    localStorage.setItem(CHAT_INPUT_KEY, input)
+  } catch {
+    // ignore storage errors (quota/private mode)
+  }
 }
 
 export default function ChatPage() {
-  const { dialogs, activeDialogId, appendDialogMessage, appendTerminalLine, setActiveTab, selectedModel } = useAppState()
-  const [input, setInput] = useState('')
+  const [messages, setMessages] = useState<Message[]>(loadMessages)
+  const [input, setInput] = useState(loadInput)
   const [loading, setLoading] = useState(false)
-  const [listening, setListening] = useState(false)
-  const [voiceSessionId, setVoiceSessionId] = useState<string | null>(null)
-  const recognitionRef = useRef<BrowserRecognition | null>(null)
+  const [useMemory, setUseMemory] = useState<boolean>(loadUseMemory)
+  const [isDictating, setIsDictating] = useState(false)
 
-  const activeDialog = useMemo(() => dialogs.find((d) => d.id === activeDialogId), [dialogs, activeDialogId])
-  const messages = activeDialog?.messages || []
+  const messagesRef = useRef(messages)
+  const useMemoryRef = useRef(useMemory)
+  const inputRef = useRef(input)
+  const recognitionRef = useRef<any>(null)
 
-  const runSandboxLive = async (code: string) => {
-    let running = true
-    const poll = window.setInterval(() => {
-      if (running) appendTerminalLine({ stream: 'system', text: '[poll] sandbox running...' })
-    }, 1000)
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop()
+      }
+    }
+  }, [])
+
+  const updateMessages = (next: Message[] | ((prev: Message[]) => Message[])) => {
+    setMessages(prev => {
+      const computed = typeof next === 'function' ? (next as (p: Message[]) => Message[])(prev) : next
+      messagesRef.current = computed
+      persistState(computed, useMemoryRef.current, inputRef.current)
+      return computed
+    })
+  }
+
+  const updateUseMemory = (next: boolean) => {
+    useMemoryRef.current = next
+    setUseMemory(next)
+    persistState(messagesRef.current, next, inputRef.current)
+  }
+
+  const updateInput = (next: string) => {
+    inputRef.current = next
+    setInput(next)
+    persistState(messagesRef.current, useMemoryRef.current, next)
+  }
+
+  const stopDictation = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop()
+      recognitionRef.current = null
+    }
+    setIsDictating(false)
+  }
+
+  const startDictation = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      updateMessages(prev => [...prev, {
+        role: 'assistant',
+        content: '❌ Браузер не поддерживает SpeechRecognition для диктовки в чат.'
+      }])
+      return
+    }
 
     try {
-      appendTerminalLine({ stream: 'system', text: '$ sandbox execute --language python' })
-      const result = await sandboxAPI.execute(code, 'python', 120)
-      appendTerminalLine({ stream: result.exit_code === 0 ? 'stdout' : 'stderr', text: `exit_code=${result.exit_code}` })
-      if (result.stdout) appendTerminalLine({ stream: 'stdout', text: result.stdout })
-      if (result.stderr) appendTerminalLine({ stream: 'stderr', text: result.stderr })
-      return result
-    } finally {
-      running = false
-      window.clearInterval(poll)
+      const rec = new SpeechRecognition()
+      rec.lang = 'ru-RU'
+      rec.interimResults = true
+      rec.maxAlternatives = 1
+      rec.continuous = true
+
+      let lastSegment = ''
+      rec.onresult = (event: any) => {
+        const parts: string[] = []
+        for (let i = event.resultIndex; i < event.results.length; i += 1) {
+          parts.push(event.results[i][0].transcript)
+        }
+        const segment = parts.join(' ').trim()
+        if (!segment) return
+
+        const base = inputRef.current.endsWith(lastSegment)
+          ? inputRef.current.slice(0, inputRef.current.length - lastSegment.length).trim()
+          : inputRef.current
+        const nextInput = [base, segment].filter(Boolean).join(' ').trim()
+        lastSegment = segment
+        updateInput(nextInput)
+      }
+
+      rec.onerror = (event: any) => {
+        setIsDictating(false)
+        updateMessages(prev => [...prev, {
+          role: 'assistant',
+          content: `❌ Ошибка диктовки: ${event?.error || 'unknown'}`
+        }])
+      }
+      rec.onend = () => {
+        setIsDictating(false)
+        recognitionRef.current = null
+      }
+
+      recognitionRef.current = rec
+      rec.start()
+      setIsDictating(true)
+    } catch (e: any) {
+      setIsDictating(false)
+      updateMessages(prev => [...prev, {
+        role: 'assistant',
+        content: `❌ Не удалось запустить диктовку: ${e?.message || 'unknown'}`
+      }])
     }
   }
 
-  const autoToolsIfNeeded = async (text: string) => {
-    if (!ACTION_INTENT_RE.test(text)) return null
-    setActiveTab('terminal')
-    appendTerminalLine({ stream: 'system', text: '$ agent detect-action-intent' })
-    appendTerminalLine({ stream: 'system', text: '$ web_search' })
-    const searchResp = await onlineAPI.search(text, 5)
-    const results = Array.isArray(searchResp?.results) ? searchResp.results : []
-    appendTerminalLine({ stream: 'system', text: `web_search results=${results.length}` })
-    const sandboxResp = await runSandboxLive(buildSandboxScript(text, results))
-    return { results, sandboxResp }
-  }
+  const sendMessage = async () => {
+    if (!input.trim() || loading) return
 
-  const sendMessage = async (raw?: string, source: 'text' | 'voice' = 'text') => {
-    const text = (raw ?? input).trim()
-    if (!text || loading || !activeDialog) return
-    appendDialogMessage(activeDialog.id, { role: 'user', content: text })
-    if (source === 'text') setInput('')
+    const userMessage: Message = { role: 'user', content: input }
+    const nextMessages = [...messagesRef.current, userMessage]
+
+    updateMessages(nextMessages)
+    updateInput('')
     setLoading(true)
 
     try {
-      const toolContext = await autoToolsIfNeeded(text)
-      const payloadMessages: Array<{ role: string; content: string }> = [
-        { role: 'system', content: AGENT_SYSTEM_PROMPT },
-        { role: 'system', content: `Selected model: ${selectedModel}` },
-        ...[...messages, { id: 'tmp_user', role: 'user' as const, content: text, createdAt: Date.now() }].map((m) => ({ role: m.role, content: m.content }))
-      ]
+      const response = await chatAPI.send(nextMessages, useMemoryRef.current)
 
-      if (toolContext) {
-        payloadMessages.push({
-          role: 'system',
-          content: `TOOL_CONTEXT: ${JSON.stringify({
-            web_results_count: toolContext.results.length,
-            sandbox_exit_code: toolContext.sandboxResp?.exit_code,
-            sandbox_stdout_tail: String(toolContext.sandboxResp?.stdout || '').slice(-800),
-            sandbox_stderr_tail: String(toolContext.sandboxResp?.stderr || '').slice(-800)
-          })}`
-        })
-      }
-
-      const response = await chatAPI.send(payloadMessages, true)
-      appendDialogMessage(activeDialog.id, { role: 'assistant', content: response?.response || 'No response' })
+      updateMessages(prev => [...prev, {
+        role: 'assistant',
+        content: response.response,
+        id: response.interaction_id
+      }])
     } catch (error: any) {
-      appendDialogMessage(activeDialog.id, { role: 'assistant', content: `❌ ${error?.response?.data?.detail || error?.message || 'request failed'}` })
+      console.error('Chat error:', error)
+      const detail = error?.response?.data?.detail
+      updateMessages(prev => [...prev, {
+        role: 'assistant',
+        content: detail ? `❌ ${detail}` : '❌ Ошибка соединения с сервером'
+      }])
     } finally {
       setLoading(false)
     }
   }
 
-  const toggleVoice = async () => {
-    if (listening) {
-      recognitionRef.current?.stop()
-      setListening(false)
-      if (voiceSessionId) await voiceAPI.stopSession(voiceSessionId)
-      setVoiceSessionId(null)
-      return
+  const handleFeedback = async (messageId: string, helpful: boolean) => {
+    try {
+      await chatAPI.feedback(messageId, helpful)
+    } catch (error) {
+      console.error('Feedback error:', error)
     }
-
-    const voiceSession = await voiceAPI.startSession('duplex', 'female')
-    setVoiceSessionId(voiceSession.voice_session_id)
-    await voiceAPI.verifyMicrophone(voiceSession.voice_session_id, true, 'browser_speech_recognition', 'voice command path active')
-
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-    if (!SpeechRecognition) return
-
-    const rec: BrowserRecognition = new SpeechRecognition()
-    rec.lang = 'ru-RU'
-    rec.interimResults = false
-    rec.maxAlternatives = 1
-    rec.continuous = true
-    rec.onresult = (event: any) => {
-      const transcript = event.results?.[event.results.length - 1]?.[0]?.transcript?.trim()
-      if (transcript) void sendMessage(transcript, 'voice')
-    }
-    rec.onerror = () => setListening(false)
-    rec.onend = () => setListening(false)
-    rec.start()
-    recognitionRef.current = rec
-    setListening(true)
   }
 
   return (
-    <div className="h-full flex flex-col overflow-hidden bg-[#0f0f10]">
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {messages.map((msg) => (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* Messages */}
+      <div style={{
+        flex: 1,
+        overflowY: 'auto',
+        padding: '1rem',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '1rem'
+      }}>
+        {messages.map((msg, idx) => (
           <div
-            key={msg.id}
-            className={`max-w-[86%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm ${
-              msg.role === 'user' ? 'ml-auto bg-[#2a2a2f] text-white' : 'bg-[#1b1b20] text-neutral-200 border border-[#2e2e36]'
-            }`}
+            key={idx}
+            style={{
+              alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
+              maxWidth: '80%'
+            }}
           >
-            {msg.content}
+            <div style={{
+              background: msg.role === 'user' ? '#3b82f6' : '#1f1f1f',
+              padding: '0.75rem 1rem',
+              borderRadius: '1rem',
+              wordWrap: 'break-word'
+            }}>
+              {msg.content}
+            </div>
+
+            {msg.role === 'assistant' && msg.id && (
+              <div style={{
+                display: 'flex',
+                gap: '0.5rem',
+                marginTop: '0.5rem',
+                fontSize: '0.875rem'
+              }}>
+                <button
+                  onClick={() => handleFeedback(msg.id!, true)}
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid #333',
+                    borderRadius: '0.5rem',
+                    padding: '0.25rem 0.5rem',
+                    color: '#888',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <ThumbsUp size={14} />
+                </button>
+                <button
+                  onClick={() => handleFeedback(msg.id!, false)}
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid #333',
+                    borderRadius: '0.5rem',
+                    padding: '0.25rem 0.5rem',
+                    color: '#888',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <ThumbsDown size={14} />
+                </button>
+              </div>
+            )}
           </div>
         ))}
-      </div>
 
-      <div className="shrink-0 p-3">
-        <div className="rounded-3xl border border-[#32343a] bg-[#1a1a1f] p-3">
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void sendMessage()
-            }}
-            placeholder="Задайте любой вопрос..."
-            className="w-full bg-transparent text-neutral-200 placeholder:text-neutral-500 outline-none border-none text-[30px]"
-          />
-          <div className="mt-3 flex items-center justify-between">
-            <button className="h-11 w-11 rounded-full border border-[#383a42] flex items-center justify-center text-neutral-300">
-              <Plus size={20} />
-            </button>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => void toggleVoice()}
-                className={`h-11 w-11 rounded-full flex items-center justify-center ${
-                  listening ? 'bg-red-600 text-white' : 'bg-transparent text-neutral-300 border border-[#383a42]'
-                }`}
-              >
-                <Mic size={20} />
-              </button>
-              <button
-                onClick={() => void sendMessage()}
-                disabled={loading}
-                className="h-11 w-11 rounded-full bg-neutral-300 text-black flex items-center justify-center disabled:opacity-60"
-              >
-                <ArrowRight size={20} />
-              </button>
+        {loading && (
+          <div style={{ alignSelf: 'flex-start' }}>
+            <div style={{
+              background: '#1f1f1f',
+              padding: '0.75rem 1rem',
+              borderRadius: '1rem'
+            }}>
+              Думаю...
             </div>
           </div>
-        </div>
+        )}
+      </div>
+
+      {/* Input */}
+      <div style={{
+        padding: '1rem',
+        borderTop: '1px solid #222',
+        display: 'flex',
+        gap: '0.5rem',
+        alignItems: 'center'
+      }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem' }}>
+          <input
+            type="checkbox"
+            checked={useMemory}
+            onChange={(e) => updateUseMemory(e.target.checked)}
+          />
+          Память
+        </label>
+
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => updateInput(e.target.value)}
+          onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+          placeholder="Сообщение..."
+          style={{
+            flex: 1,
+            background: '#1a1a1a',
+            border: '1px solid #333',
+            borderRadius: '1.5rem',
+            padding: '0.75rem 1rem',
+            color: '#fff',
+            outline: 'none'
+          }}
+        />
+
+        <button
+          onClick={sendMessage}
+          disabled={loading || !input.trim()}
+          style={{
+            background: '#3b82f6',
+            border: 'none',
+            borderRadius: '50%',
+            width: '3rem',
+            height: '3rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: loading ? 'not-allowed' : 'pointer',
+            opacity: loading ? 0.5 : 1
+          }}
+        >
+          <Send size={20} />
+        </button>
+
+        <button
+          onClick={isDictating ? stopDictation : startDictation}
+          style={{
+            background: isDictating ? '#dc2626' : '#374151',
+            border: 'none',
+            borderRadius: '50%',
+            width: '3rem',
+            height: '3rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            color: '#fff'
+          }}
+          title={isDictating ? 'Остановить диктовку' : 'Диктовка в чат'}
+        >
+          {isDictating ? <Square size={18} /> : <Mic size={18} />}
+        </button>
       </div>
     </div>
   )
