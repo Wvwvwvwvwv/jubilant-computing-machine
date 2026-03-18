@@ -178,7 +178,7 @@ export default function ChatPage() {
             onKeyDown={(e) => {
               if (e.key === 'Enter') void sendMessage()
             }}
-            placeholder=""
+            placeholder="Задайте любой вопрос..."
             className="w-full bg-transparent text-neutral-200 placeholder:text-neutral-500 outline-none border-none text-[30px]"
           />
           <div className="mt-3 flex items-center justify-between">

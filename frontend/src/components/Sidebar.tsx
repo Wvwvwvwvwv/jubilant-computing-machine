@@ -6,7 +6,7 @@ export default function Sidebar({ open, onClose }: { open: boolean; onClose: () 
         onClick={onClose}
       />
       <aside
-        className={`fixed left-0 top-0 z-50 h-screen w-[280px] min-[1600px]:w-[300px] bg-[#111111] border-r border-[#222] transition-transform duration-300 ${
+        className={`fixed left-0 top-0 z-50 h-screen w-[72vw] max-w-[320px] bg-[#111111] border-r border-[#222] transition-transform duration-300 ${
           open ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
