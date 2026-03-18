@@ -17,7 +17,7 @@ export const chatAPI = {
     const { data } = await api.post('/chat/', {
       messages,
       use_memory: useMemory,
-      autonomous_mode: options.autonomousMode ?? 'force',
+      autonomous_mode: options.autonomousMode ?? 'auto',
       web_search: options.webSearch ?? true
     })
     return data

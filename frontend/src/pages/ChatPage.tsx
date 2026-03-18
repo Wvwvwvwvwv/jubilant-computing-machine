@@ -73,6 +73,22 @@ function persistState(messages: Message[], useMemory: boolean, input: string) {
   }
 }
 
+function inferAutonomousMode(prompt: string): 'off' | 'auto' {
+  const lowered = prompt.toLowerCase()
+  const actionMarkers = ['установ', 'скачай', 'запусти', 'выполни', 'install', 'download', 'run ', 'execute', 'pkg install', 'apt install', 'pip install']
+  const researchMarkers = ['найди', 'поищи', 'резюме', 'summary', 'summar', 'обзор', 'расскажи', 'прочитай', 'readme', 'github.com', 'http://', 'https://']
+
+  if (actionMarkers.some((marker) => lowered.includes(marker))) {
+    return 'auto'
+  }
+
+  if (researchMarkers.some((marker) => lowered.includes(marker))) {
+    return 'off'
+  }
+
+  return 'auto'
+}
+
 export default function ChatPage() {
   const navigate = useNavigate()
   const [messages, setMessages] = useState<Message[]>(loadMessages)
@@ -185,6 +201,8 @@ export default function ChatPage() {
     if (!input.trim() || loading) return
 
     const prompt = input.trim()
+    const autonomousMode = inferAutonomousMode(prompt)
+    const sandboxModeLabel = autonomousMode === 'off' ? 'Sandbox: пропущен для research-only запроса' : 'Sandbox: auto'
     const userMessage: Message = { role: 'user', content: prompt }
     const nextMessages = [...messagesRef.current, userMessage]
 
@@ -197,7 +215,7 @@ export default function ChatPage() {
       { text: `> ${prompt}`, stream: 'stdout' },
       { text: 'Подготовка запроса без ручного подтверждения…', stream: 'status' },
       { text: 'Web search: enabled', stream: 'status' },
-      { text: 'Sandbox: enabled', stream: 'status' },
+      { text: sandboxModeLabel, stream: 'status' },
       { text: 'Terminal attached to current chat run.', stream: 'status' },
     ])
     navigate('/terminal')
@@ -205,7 +223,7 @@ export default function ChatPage() {
     try {
       appendTerminalEntry('Запрос отправлен в /api/chat/…', 'status')
       const response = await chatAPI.send(nextMessages, useMemoryRef.current, {
-        autonomousMode: 'force',
+        autonomousMode,
         webSearch: true
       })
 
@@ -220,7 +238,7 @@ export default function ChatPage() {
         }
         appendTerminalEntry(`status=${response.autonomous.status || 'unknown'}`, response.autonomous.exit_code === 0 ? 'status' : 'stderr')
       } else {
-        appendTerminalEntry('Автономное sandbox-выполнение не вернуло отдельный trace; получен только финальный ответ.', 'status')
+        appendTerminalEntry(autonomousMode === 'off' ? 'Sandbox пропущен: research-only запрос обработан через web/context chat.' : 'Sandbox не запускался: backend обработал запрос как обычный chat-response.', 'status')
       }
 
       finishTerminalSession('Сессия завершена.')
