@@ -9,12 +9,15 @@ set -euo pipefail
 # If the local core API is reachable, also verifies /api/online/health,
 # /api/online/search and /api/online/download.
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+
 HOST_CORE="${HOST_CORE:-http://127.0.0.1:8000}"
 ACCESS_URL="${ACCESS_URL:-https://api.github.com/}"
 INFO_URL="${INFO_URL:-https://api.github.com/repos/Wvwvwvwvwv/jubilant-computing-machine}"
 DOWNLOAD_URL="${DOWNLOAD_URL:-https://raw.githubusercontent.com/Wvwvwvwvwv/jubilant-computing-machine/main/README.md}"
 SEARCH_QUERY="${SEARCH_QUERY:-latest python release}"
-OUT_DIR="${OUT_DIR:-logs}"
+OUT_DIR="${OUT_DIR:-$REPO_ROOT/logs}"
 STRICT="${STRICT:-0}"
 CHECK_API="${CHECK_API:-1}"
 
@@ -43,6 +46,7 @@ warn_or_fail() {
 }
 
 echo "== Online tools / internet sanity check =="
+echo "repo root: $REPO_ROOT"
 echo "out dir: $OUT_DIR"
 echo "core url: $HOST_CORE"
 
@@ -105,8 +109,12 @@ print(str(bool(json.load(open(sys.argv[1], encoding='utf-8')).get('enabled'))).l
 PY
 )"
     if [[ "$ENABLED" != "true" ]]; then
-      warn_or_fail "online tools API reachable but disabled; export ENABLE_ONLINE_TOOLS=1"
-    else
+      if [[ "$STRICT" == "1" ]]; then
+        warn_or_fail "online tools API reachable but disabled; restart core with ENABLE_ONLINE_TOOLS=1 to validate /api/online/*"
+      else
+        echo "[skip] local online API is disabled; restart core with ENABLE_ONLINE_TOOLS=1 to validate /api/online/*"
+      fi
+    elif [[ "$ENABLED" == "true" ]]; then
       echo "[ok] local /api/online/health reports enabled=true"
 
       SEARCH_BODY="$(python3 - <<'PY'
